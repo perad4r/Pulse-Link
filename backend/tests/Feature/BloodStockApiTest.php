@@ -12,6 +12,7 @@ use App\Models\SmartAlert;
 use App\Models\User;
 use App\Services\AI\InventoryForecastService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class BloodStockApiTest extends TestCase
@@ -69,6 +70,8 @@ class BloodStockApiTest extends TestCase
             'hospital_id' => $this->hospitalA->id,
             'permissions' => ['dashboard.view', 'posts.manage'],
         ]);
+
+        Sanctum::actingAs($this->sysAdmin);
     }
 
     public function test_admin_can_view_blood_stocks_for_any_hospital(): void
@@ -94,6 +97,8 @@ class BloodStockApiTest extends TestCase
 
     public function test_hospital_staff_is_scoped_to_their_own_hospital(): void
     {
+        Sanctum::actingAs($this->staffA);
+
         // Tạo túi máu tại Bệnh viện B
         BloodStock::create([
             'hospital_id' => $this->hospitalB->id,

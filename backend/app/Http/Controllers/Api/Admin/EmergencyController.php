@@ -524,14 +524,11 @@ class EmergencyController extends Controller
     public function commit(Request $request, EmergencyAlert $alert): JsonResponse
     {
         $payload = $request->validate([
-            'donor_id' => ['nullable', 'integer', 'exists:users,id'],
             'latitude' => ['nullable', 'numeric'],
             'longitude' => ['nullable', 'numeric'],
             'eta_minutes' => ['nullable', 'integer', 'min:1', 'max:240'],
         ]);
-        $donor = $this->mobileUserResolver->resolve(
-            $payload['donor_id'] ?? $request->integer('user_id')
-        );
+        $donor = $this->mobileUserResolver->resolve();
         $hasLocation = array_key_exists('latitude', $payload) && array_key_exists('longitude', $payload);
 
         $commitment = EmergencyCommitment::query()
@@ -584,15 +581,12 @@ class EmergencyController extends Controller
     public function updateLocation(Request $request, EmergencyAlert $alert): JsonResponse
     {
         $payload = $request->validate([
-            'donor_id' => ['nullable', 'integer', 'exists:users,id'],
             'latitude' => ['required', 'numeric'],
             'longitude' => ['required', 'numeric'],
             'eta_minutes' => ['nullable', 'integer', 'min:1', 'max:240'],
             'status' => ['nullable', 'in:committed,en_route,cancelled'],
         ]);
-        $donor = $this->mobileUserResolver->resolve(
-            $payload['donor_id'] ?? $request->integer('user_id')
-        );
+        $donor = $this->mobileUserResolver->resolve();
 
         $commitment = EmergencyCommitment::query()
             ->where('emergency_alert_id', $alert->id)
@@ -617,12 +611,9 @@ class EmergencyController extends Controller
     public function cancelCommitment(Request $request, EmergencyAlert $alert): JsonResponse
     {
         $payload = $request->validate([
-            'donor_id' => ['nullable', 'integer', 'exists:users,id'],
             'cancel_reason' => ['required', 'string', 'max:1000'],
         ]);
-        $donor = $this->mobileUserResolver->resolve(
-            $payload['donor_id'] ?? $request->integer('user_id')
-        );
+        $donor = $this->mobileUserResolver->resolve();
 
         $commitment = EmergencyCommitment::query()
             ->where('emergency_alert_id', $alert->id)

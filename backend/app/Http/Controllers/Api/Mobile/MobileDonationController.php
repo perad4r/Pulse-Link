@@ -174,7 +174,6 @@ class MobileDonationController extends Controller
     public function storeHistory(Request $request): JsonResponse
     {
         $payload = $request->validate([
-            'user_id' => ['nullable', 'integer', 'exists:users,id'],
             'donated_at' => ['required', 'date'],
             'location_name' => ['required', 'string', 'max:255'],
             'volume_ml' => ['required', 'integer', Rule::in([250, 350, 450])],
@@ -182,7 +181,7 @@ class MobileDonationController extends Controller
             'notes' => ['nullable', 'string'],
         ]);
 
-        $user = $this->mobileUserResolver->resolve($payload['user_id'] ?? null);
+        $user = $this->mobileUserResolver->resolve();
         $history = DonationHistory::create($this->recognitionService->prepareCertificateAttributes([
             ...$payload,
             'user_id' => $user->id,

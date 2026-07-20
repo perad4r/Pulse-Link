@@ -2,10 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Events\EmergencyCommitmentUpdated;
+use App\Models\BloodStock;
 use App\Models\EmergencyAlert;
 use App\Models\EmergencyCommitment;
-use App\Models\BloodStock;
-use App\Models\BloodStockMovement;
 use App\Models\Hospital;
 use App\Models\User;
 use App\Services\Contracts\EmergencyAlertRealtimeGateway;
@@ -13,6 +13,7 @@ use App\Services\Donations\DonationRecognitionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class EmergencyAlertApiTest extends TestCase
@@ -34,6 +35,7 @@ class EmergencyAlertApiTest extends TestCase
         $this->app->instance(EmergencyAlertRealtimeGateway::class, $fakeRealtimeGateway);
 
         $this->seed();
+        Sanctum::actingAs(User::query()->where('role', 'system_admin')->firstOrFail());
 
         $hospital = Hospital::query()->firstOrFail();
 
@@ -76,6 +78,7 @@ class EmergencyAlertApiTest extends TestCase
         $this->seed();
 
         $staff = User::query()->where('email', 'admin@pulselink.test')->firstOrFail();
+        Sanctum::actingAs($staff);
         $hospital = Hospital::query()->where('code', 'CR-79')->firstOrFail();
         $exactDonor = User::factory()->create([
             'role' => 'donor',
@@ -130,6 +133,7 @@ class EmergencyAlertApiTest extends TestCase
         $this->app->instance(EmergencyAlertRealtimeGateway::class, $fakeRealtimeGateway);
 
         $this->seed();
+        Sanctum::actingAs(User::query()->where('role', 'system_admin')->firstOrFail());
 
         $hospital = Hospital::query()->firstOrFail();
         $initialActiveAlerts = EmergencyAlert::query()
@@ -182,6 +186,7 @@ class EmergencyAlertApiTest extends TestCase
         $systemAdmin = User::query()->where('email', 'system@pulselink.test')->firstOrFail();
         $choRayStaff = User::query()->where('email', 'admin@pulselink.test')->firstOrFail();
         $bachMai = Hospital::query()->where('code', 'BM-01')->firstOrFail();
+        Sanctum::actingAs($systemAdmin);
 
         $alertId = $this->postJson("/api/admin/emergency-alerts?admin_user_id={$systemAdmin->id}", [
             'hospital_id' => $bachMai->id,
@@ -194,6 +199,7 @@ class EmergencyAlertApiTest extends TestCase
             ->assertCreated()
             ->json('data.id');
 
+        Sanctum::actingAs($choRayStaff);
         $this->getJson("/api/admin/dashboard?admin_user_id={$choRayStaff->id}")
             ->assertOk()
             ->assertJsonMissing(['id' => $alertId]);
@@ -231,6 +237,7 @@ class EmergencyAlertApiTest extends TestCase
         $donor->refresh();
         $initialDonations = $donor->total_donations;
         $initialPoints = $donor->points;
+        Sanctum::actingAs($staff);
 
         $alertId = $this->postJson("/api/admin/emergency-alerts?admin_user_id={$staff->id}", [
             'hospital_id' => $hospital->id,
@@ -243,6 +250,7 @@ class EmergencyAlertApiTest extends TestCase
             ->assertCreated()
             ->json('data.id');
 
+        Sanctum::actingAs($donor);
         $this->postJson("/api/mobile/sos-alerts/{$alertId}/commit", [
             'donor_id' => $donor->id,
             'eta_minutes' => 12,
@@ -253,6 +261,7 @@ class EmergencyAlertApiTest extends TestCase
             ->where('donor_id', $donor->id)
             ->firstOrFail();
 
+        Sanctum::actingAs($staff);
         $this->postJson("/api/admin/emergency-alerts/{$alertId}/commitments/{$commitment->id}/donated?admin_user_id={$staff->id}", [
             'volume_ml' => 450,
         ])
@@ -330,6 +339,7 @@ class EmergencyAlertApiTest extends TestCase
             ->where('role', 'donor')
             ->where('blood_type', 'O+')
             ->firstOrFail();
+        Sanctum::actingAs($donor);
         $hospital = Hospital::query()->where('code', 'VT-31')->firstOrFail();
 
         $compatibleAlert = EmergencyAlert::query()->create([
@@ -403,6 +413,7 @@ class EmergencyAlertApiTest extends TestCase
             ->where('blood_type', 'O+')
             ->take(3)
             ->get();
+        Sanctum::actingAs($staff);
 
         $alertId = $this->postJson("/api/admin/emergency-alerts?admin_user_id={$staff->id}", [
             'hospital_id' => $hospital->id,
@@ -414,6 +425,7 @@ class EmergencyAlertApiTest extends TestCase
         ])->assertCreated()->json('data.id');
 
         foreach ($donors->take(2) as $donor) {
+            Sanctum::actingAs($donor);
             $this->postJson("/api/mobile/sos-alerts/{$alertId}/commit", [
                 'donor_id' => $donor->id,
                 'eta_minutes' => 10,
@@ -425,6 +437,7 @@ class EmergencyAlertApiTest extends TestCase
             ->where('donor_id', $donors[0]->id)
             ->firstOrFail();
 
+        Sanctum::actingAs($staff);
         $this->postJson("/api/admin/emergency-alerts/{$alertId}/commitments/{$firstCommitment->id}/donated?admin_user_id={$staff->id}", [
             'volume_ml' => 350,
         ])->assertOk();
@@ -437,12 +450,14 @@ class EmergencyAlertApiTest extends TestCase
             'status' => 'committed',
         ]);
 
+        Sanctum::actingAs($donors[2]);
         $this->postJson("/api/mobile/sos-alerts/{$alertId}/commit", [
             'donor_id' => $donors[2]->id,
             'eta_minutes' => 20,
         ])->assertStatus(409)
             ->assertJsonPath('message', 'Cảm ơn bạn, ca SOS này đã nhận đủ số đơn vị máu cần thiết và đã ngừng nhận thêm cam kết mới.');
 
+        Sanctum::actingAs($staff);
         $this->postJson("/api/admin/emergency-alerts/{$alertId}/complete?admin_user_id={$staff->id}")->assertOk();
 
         $this->assertDatabaseHas('emergency_commitments', [
@@ -466,6 +481,7 @@ class EmergencyAlertApiTest extends TestCase
             ->where('role', 'donor')
             ->where('blood_type', 'O+')
             ->firstOrFail();
+        Sanctum::actingAs($staff);
 
         $alertId = $this->postJson("/api/admin/emergency-alerts?admin_user_id={$staff->id}", [
             'hospital_id' => $hospital->id,
@@ -476,6 +492,7 @@ class EmergencyAlertApiTest extends TestCase
             'expires_at' => now()->addMinutes(45)->toIso8601String(),
         ])->assertCreated()->json('data.id');
 
+        Sanctum::actingAs($donor);
         $this->postJson("/api/mobile/sos-alerts/{$alertId}/commit", [
             'donor_id' => $donor->id,
             'eta_minutes' => 10,
@@ -486,6 +503,7 @@ class EmergencyAlertApiTest extends TestCase
             ->where('donor_id', $donor->id)
             ->firstOrFail();
 
+        Sanctum::actingAs($staff);
         $this->postJson("/api/admin/emergency-alerts/{$alertId}/commitments/{$commitment->id}/donated?admin_user_id={$staff->id}", [
             'volume_ml' => 350,
         ])->assertOk();
@@ -495,7 +513,7 @@ class EmergencyAlertApiTest extends TestCase
             ->firstOrFail();
         $this->assertSame('processing', $stock->status);
 
-        $initialRealtimePayload = (new \App\Events\EmergencyCommitmentUpdated(
+        $initialRealtimePayload = (new EmergencyCommitmentUpdated(
             $commitment->refresh()->load('donor', 'alert', 'bloodJourney.steps')
         ))->broadcastWith();
         $this->assertNull($initialRealtimePayload['commitment']['blood_journey']['final_message']);
@@ -516,7 +534,7 @@ class EmergencyAlertApiTest extends TestCase
             'type' => 'blood_journey_completed',
         ]);
 
-        $completedRealtimePayload = (new \App\Events\EmergencyCommitmentUpdated(
+        $completedRealtimePayload = (new EmergencyCommitmentUpdated(
             $commitment->refresh()->load('donor', 'alert', 'bloodJourney.steps')
         ))->broadcastWith();
         $completedCard = $completedRealtimePayload['commitment']['blood_journey']['gratitude_card'];

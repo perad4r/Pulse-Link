@@ -13,6 +13,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class MobileContractApiTest extends TestCase
@@ -24,6 +25,7 @@ class MobileContractApiTest extends TestCase
         $this->seed();
 
         $donor = User::query()->where('role', 'donor')->firstOrFail();
+        Sanctum::actingAs($donor);
 
         $this->getJson("/api/mobile/me/hero-pass?user_id={$donor->id}")
             ->assertOk()
@@ -51,6 +53,7 @@ class MobileContractApiTest extends TestCase
     {
         $this->seed();
         $donor = User::query()->where('role', 'donor')->firstOrFail();
+        Sanctum::actingAs($donor);
 
         $this->getJson("/api/mobile/me/notification-preferences?user_id={$donor->id}")
             ->assertOk()
@@ -110,6 +113,7 @@ class MobileContractApiTest extends TestCase
             'role' => 'donor',
             'blood_type' => 'O+',
         ]);
+        Sanctum::actingAs($donor);
         $hospital = Hospital::query()->firstOrFail();
         $donatedAt = now()->startOfDay();
 
@@ -149,6 +153,7 @@ class MobileContractApiTest extends TestCase
         $this->seed();
 
         $donor = User::query()->where('role', 'donor')->firstOrFail();
+        Sanctum::actingAs($donor);
         $event = DonationEvent::query()->whereHas('appointments', function ($query) use ($donor): void {
             $query->where('user_id', $donor->id)->where('status', 'booked');
         })->firstOrFail();
@@ -205,6 +210,7 @@ class MobileContractApiTest extends TestCase
     public function test_admin_can_create_daily_event_and_community_post(): void
     {
         $this->seed();
+        Sanctum::actingAs(User::query()->where('role', 'system_admin')->firstOrFail());
 
         $this->postJson('/api/admin/donation-events', [
             'title' => 'Ngày hội hiến máu tại Quận 7',
@@ -242,6 +248,7 @@ class MobileContractApiTest extends TestCase
     public function test_mobile_route_plan_contract_matches_flutter_parser(): void
     {
         $this->seed();
+        Sanctum::actingAs(User::query()->where('role', 'donor')->firstOrFail());
 
         $this->postJson('/api/mobile/routes/plan', [
             'origin' => ['latitude' => 10.7727, 'longitude' => 106.6663],
@@ -260,13 +267,14 @@ class MobileContractApiTest extends TestCase
             ]);
     }
 
-    public function test_mobile_sos_commit_accepts_explicit_donor_identity(): void
+    public function test_mobile_sos_commit_accepts_legacy_identity_hint_for_authenticated_donor(): void
     {
         Event::fake();
         $this->seed();
 
         $alert = EmergencyAlert::query()->where('status', 'active')->firstOrFail();
         $donor = User::query()->where('role', 'donor')->whereNotNull('latitude')->firstOrFail();
+        Sanctum::actingAs($donor);
 
         $this->postJson("/api/mobile/sos-alerts/{$alert->public_id}/commit", [
             'donor_id' => $donor->id,
@@ -303,6 +311,7 @@ class MobileContractApiTest extends TestCase
 
         $alert = EmergencyAlert::query()->where('status', 'active')->firstOrFail();
         $donor = User::query()->where('role', 'donor')->whereNotNull('latitude')->firstOrFail();
+        Sanctum::actingAs($donor);
 
         $this->postJson("/api/mobile/sos-alerts/{$alert->public_id}/commit", [
             'donor_id' => $donor->id,
@@ -360,6 +369,7 @@ class MobileContractApiTest extends TestCase
 
         $alert = EmergencyAlert::query()->where('status', 'active')->firstOrFail();
         $donor = User::query()->where('role', 'donor')->whereNotNull('latitude')->firstOrFail();
+        Sanctum::actingAs($donor);
 
         $this->postJson("/api/mobile/sos-alerts/{$alert->public_id}/commit", [
             'donor_id' => $donor->id,
@@ -397,6 +407,7 @@ class MobileContractApiTest extends TestCase
 
         $alert = EmergencyAlert::query()->where('status', 'active')->firstOrFail();
         $donor = User::query()->where('role', 'donor')->whereNotNull('latitude')->firstOrFail();
+        Sanctum::actingAs($donor);
 
         $this->postJson("/api/mobile/sos-alerts/{$alert->public_id}/commit", [
             'donor_id' => $donor->id,
@@ -422,6 +433,7 @@ class MobileContractApiTest extends TestCase
 
         $alert = EmergencyAlert::query()->where('status', 'active')->firstOrFail();
         $donor = User::query()->where('role', 'donor')->whereNotNull('latitude')->firstOrFail();
+        Sanctum::actingAs($donor);
 
         $this->postJson("/api/mobile/sos-alerts/{$alert->public_id}/commit", [
             'donor_id' => $donor->id,
@@ -451,6 +463,7 @@ class MobileContractApiTest extends TestCase
 
         $alert = EmergencyAlert::query()->where('status', 'active')->firstOrFail();
         $donor = User::query()->where('role', 'donor')->whereNotNull('latitude')->firstOrFail();
+        Sanctum::actingAs($donor);
 
         $this->postJson("/api/mobile/sos-alerts/{$alert->public_id}/commit", [
             'donor_id' => $donor->id,

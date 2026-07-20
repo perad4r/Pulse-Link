@@ -3,18 +3,19 @@
 namespace Tests\Feature;
 
 use App\Models\BloodStock;
-use App\Models\BloodStockMovement;
-use App\Models\CommunityPost;
 use App\Models\ChatConversation;
+use App\Models\CommunityPost;
 use App\Models\DonationAppointment;
 use App\Models\DonationEvent;
 use App\Models\DonationHistory;
 use App\Models\Hospital;
 use App\Models\MobileNotification;
 use App\Models\User;
+use App\Services\Donations\DonationRecognitionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class AdminOperationsApiTest extends TestCase
@@ -25,6 +26,7 @@ class AdminOperationsApiTest extends TestCase
     {
         Storage::fake('public');
         $this->seed();
+        Sanctum::actingAs(User::query()->where('role', 'system_admin')->firstOrFail());
 
         $this->postJson('/api/admin/uploads', [
             'file' => UploadedFile::fake()->image('su-kien.jpg'),
@@ -40,6 +42,7 @@ class AdminOperationsApiTest extends TestCase
     public function test_admin_posts_are_paginated_searchable_and_editable(): void
     {
         $this->seed();
+        Sanctum::actingAs(User::query()->where('role', 'system_admin')->firstOrFail());
 
         $this->getJson('/api/admin/community-posts?per_page=2&status=published&q=hiến')
             ->assertOk()
@@ -68,6 +71,7 @@ class AdminOperationsApiTest extends TestCase
         $choRayStaff = User::query()->where('email', 'admin@pulselink.test')->firstOrFail();
         $bachMai = Hospital::query()->where('code', 'BM-01')->firstOrFail();
         $bachMaiEvent = DonationEvent::query()->where('hospital_id', $bachMai->id)->firstOrFail();
+        Sanctum::actingAs($systemAdmin);
 
         $this->getJson('/api/admin/donation-events?per_page=2&status=upcoming&q=hiến')
             ->assertOk()
@@ -78,6 +82,7 @@ class AdminOperationsApiTest extends TestCase
             ->assertOk()
             ->assertJsonFragment(['id' => (string) $bachMaiEvent->id]);
 
+        Sanctum::actingAs($choRayStaff);
         $this->getJson("/api/admin/donation-events?admin_user_id={$choRayStaff->id}&hospital_id={$bachMai->id}")
             ->assertOk()
             ->assertJsonMissing(['id' => (string) $bachMaiEvent->id]);
@@ -87,6 +92,7 @@ class AdminOperationsApiTest extends TestCase
             ->firstOrFail();
         $originalLocation = $event->location_name;
         $originalLatitude = (float) $event->latitude;
+        Sanctum::actingAs($systemAdmin);
 
         $this->putJson("/api/admin/donation-events/{$event->id}", [
             'title' => 'Sự kiện đã cập nhật tiêu đề',
@@ -110,12 +116,14 @@ class AdminOperationsApiTest extends TestCase
 
         $systemAdmin = User::query()->where('email', 'system@pulselink.test')->firstOrFail();
         $hospitalStaff = User::query()->where('email', 'sos.bachmai@pulselink.test')->firstOrFail();
+        Sanctum::actingAs($systemAdmin);
 
         $this->getJson("/api/admin/dashboard?admin_user_id={$systemAdmin->id}")
             ->assertOk()
             ->assertJsonCount(Hospital::query()->where('is_active', true)->count(), 'data.hospitals')
             ->assertJsonPath('data.current_admin.role', 'system_admin');
 
+        Sanctum::actingAs($hospitalStaff);
         $this->getJson("/api/admin/dashboard?admin_user_id={$hospitalStaff->id}")
             ->assertOk()
             ->assertJsonCount(1, 'data.hospitals')
@@ -143,19 +151,22 @@ class AdminOperationsApiTest extends TestCase
             ['status' => 'booked', 'booked_at' => now()]
         );
         $event->refreshBookedCount();
-        app(\App\Services\Donations\DonationRecognitionService::class)->refreshDonorRecognition($donor);
+        app(DonationRecognitionService::class)->refreshDonorRecognition($donor);
         $donor->refresh();
         $initialDonations = $donor->total_donations;
         $initialPoints = $donor->points;
+        Sanctum::actingAs($staff);
 
         $this->postJson("/api/admin/donation-events/{$event->id}/appointments/{$appointment->id}/check-in?admin_user_id={$staff->id}")
             ->assertOk()
             ->assertJsonPath('data.status', 'checked_in');
 
+        Sanctum::actingAs($donor);
         $this->postJson("/api/mobile/donation-events/{$event->id}/cancel", [
             'user_id' => $donor->id,
         ])->assertUnprocessable();
 
+        Sanctum::actingAs($staff);
         $this->postJson("/api/admin/donation-events/{$event->id}/appointments/{$appointment->id}/complete?admin_user_id={$staff->id}", [
             'volume_ml' => 450,
             'blood_type' => $donor->blood_type,
@@ -207,21 +218,25 @@ class AdminOperationsApiTest extends TestCase
         $this->assertSame($initialDonations + 1, $donor->total_donations);
         $this->assertSame($initialPoints + 450, $donor->points);
 
+        Sanctum::actingAs($donor);
         $this->getJson("/api/mobile/me/donations?user_id={$donor->id}")
             ->assertOk()
             ->assertJsonFragment(['certificate_id' => 'PL-EVENT-'.$event->id.'-'.$appointment->id])
             ->assertJsonMissing(['result_summary' => 'Kết quả xét nghiệm tổng quát ổn định.']);
 
+        Sanctum::actingAs($staff);
         $this->postJson("/api/admin/donation-events/{$event->id}/appointments/{$appointment->id}/publish-result?admin_user_id={$staff->id}", [
             'publish_result' => true,
         ])
             ->assertOk()
             ->assertJsonPath('data.result_summary', 'Kết quả xét nghiệm tổng quát ổn định.');
 
+        Sanctum::actingAs($donor);
         $this->getJson("/api/mobile/me/donations?user_id={$donor->id}")
             ->assertOk()
             ->assertJsonFragment(['result_summary' => 'Kết quả xét nghiệm tổng quát ổn định.']);
 
+        Sanctum::actingAs($staff);
         $this->postJson("/api/admin/donation-events/{$event->id}/appointments/{$appointment->id}/complete?admin_user_id={$staff->id}", [
             'volume_ml' => 350,
             'screening_status' => 'eligible',
@@ -267,6 +282,7 @@ class AdminOperationsApiTest extends TestCase
         $this->seed();
 
         $staff = User::query()->where('email', 'admin@pulselink.test')->firstOrFail();
+        Sanctum::actingAs($staff);
         $event = DonationEvent::query()->create([
             'hospital_id' => $staff->hospital_id,
             'title' => 'Lịch hiến có thể hủy',
@@ -316,12 +332,14 @@ class AdminOperationsApiTest extends TestCase
 
         $systemAdmin = User::query()->where('email', 'system@pulselink.test')->firstOrFail();
         $hospitalStaff = User::query()->where('email', 'sos.bachmai@pulselink.test')->firstOrFail();
+        Sanctum::actingAs($systemAdmin);
 
         $this->getJson('/api/admin/hospitals?per_page=3&q=Bệnh viện')
             ->assertOk()
             ->assertJsonPath('meta.per_page', 3)
             ->assertJsonStructure(['data', 'links', 'meta']);
 
+        Sanctum::actingAs($hospitalStaff);
         $this->postJson("/api/admin/hospitals?admin_user_id={$hospitalStaff->id}", [
             'name' => 'Bệnh viện Demo không được tạo',
             'code' => 'DENY-01',
@@ -332,6 +350,7 @@ class AdminOperationsApiTest extends TestCase
             'longitude' => 105.8466,
         ])->assertForbidden();
 
+        Sanctum::actingAs($systemAdmin);
         $created = $this->postJson("/api/admin/hospitals?admin_user_id={$systemAdmin->id}", [
             'name' => 'Bệnh viện Demo Pulse Link',
             'code' => 'PL-DEMO-01',

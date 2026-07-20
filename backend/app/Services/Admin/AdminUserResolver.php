@@ -9,32 +9,16 @@ class AdminUserResolver
 {
     public function resolve(Request $request): User
     {
-        $requestedId = $request->integer('admin_user_id')
-            ?: (int) $request->header('X-Admin-User-Id');
-
-        if ($requestedId) {
-            $requestedUser = User::query()
-                ->whereIn('role', ['system_admin', 'hospital_admin', 'hospital_staff'])
-                ->find($requestedId);
-
-            if ($requestedUser) {
-                return $requestedUser;
-            }
-        }
-
         $authenticatedUser = $request->user();
-        if ($authenticatedUser && in_array($authenticatedUser->role, ['system_admin', 'hospital_admin', 'hospital_staff'], true)) {
-            return $authenticatedUser;
-        }
 
-        return User::query()
-            ->where('role', 'system_admin')
-            ->orderBy('id')
-            ->first()
-            ?? User::query()
-                ->whereIn('role', ['hospital_admin', 'hospital_staff'])
-                ->orderBy('id')
-                ->firstOrFail();
+        abort_unless($authenticatedUser, 401, 'Unauthenticated.');
+        abort_unless(
+            in_array($authenticatedUser->role, ['system_admin', 'hospital_staff'], true),
+            403,
+            'Quyền truy cập bị từ chối.'
+        );
+
+        return $authenticatedUser;
     }
 
     public function canAccessHospital(User $admin, ?int $hospitalId): bool

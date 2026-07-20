@@ -1,9 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\AdminDashboardController;
+use App\Http\Controllers\Api\Admin\BloodForecastController;
 use App\Http\Controllers\Api\Admin\BloodStockController;
 use App\Http\Controllers\Api\Admin\CampaignManagerController;
-use App\Http\Controllers\Api\Admin\BloodForecastController;
 use App\Http\Controllers\Api\Admin\CommunityPostController as AdminCommunityPostController;
 use App\Http\Controllers\Api\Admin\DonationEventController as AdminDonationEventController;
 use App\Http\Controllers\Api\Admin\EmergencyController;
@@ -33,7 +33,8 @@ Route::post('auth/register', [AuthController::class, 'register']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('auth/logout', [AuthController::class, 'logout']);
     Route::get('auth/me', [AuthController::class, 'me']);
-    Route::delete('mobile/me/account', [MobileProfileController::class, 'deleteAccount']);
+    Route::delete('mobile/me/account', [MobileProfileController::class, 'deleteAccount'])
+        ->middleware('role:donor');
 });
 
 Route::prefix('locations')->group(function () {
@@ -45,7 +46,7 @@ Route::prefix('locations')->group(function () {
 Route::get('certificates/{certificateId}', [CertificateController::class, 'show']);
 Route::get('blood-journeys/{publicId}', [BloodJourneyController::class, 'show']);
 
-Route::prefix('mobile')->middleware(['role:donor'])->group(function () {
+Route::prefix('mobile')->middleware(['auth:sanctum', 'role:donor'])->group(function () {
     Route::get('me/hero-pass', [MobileProfileController::class, 'heroPass']);
     Route::post('me/hero-pass', [MobileProfileController::class, 'updateHeroPass']);
     Route::post('uploads', [MobileUploadController::class, 'store']);
@@ -91,7 +92,7 @@ Route::prefix('mobile')->middleware(['role:donor'])->group(function () {
     Route::get('donation/transactions/{transaction_id}/status', [MobileDonationFundController::class, 'checkTransactionStatus']);
 });
 
-Route::prefix('admin')->middleware(['role:admin'])->group(function () {
+Route::prefix('admin')->middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::get('dashboard', [AdminDashboardController::class, 'show']);
     Route::post('uploads', [AdminUploadController::class, 'store']);
     Route::apiResource('hospitals', AdminHospitalController::class)->except(['show']);
