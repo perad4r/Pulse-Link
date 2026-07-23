@@ -13,6 +13,7 @@ class EmergencyCommitment {
     this.committedAt,
     this.lastLocationAt,
     this.donatedAt,
+    this.donationHistoryId,
     this.bloodJourney,
   });
 
@@ -39,6 +40,7 @@ class EmergencyCommitment {
       committedAt: _parseDate(json['committed_at']),
       lastLocationAt: _parseDate(json['last_location_at']),
       donatedAt: _parseDate(json['donated_at']),
+      donationHistoryId: json['donation_history_id']?.toString(),
       bloodJourney: journeyJson is Map<String, dynamic>
           ? BloodJourney.fromJson(journeyJson)
           : null,
@@ -55,6 +57,7 @@ class EmergencyCommitment {
   final DateTime? committedAt;
   final DateTime? lastLocationAt;
   final DateTime? donatedAt;
+  final String? donationHistoryId;
   final BloodJourney? bloodJourney;
 
   EmergencyCommitment copyWith({
@@ -65,6 +68,7 @@ class EmergencyCommitment {
     int? etaMinutes,
     int? donationVolumeMl,
     DateTime? lastLocationAt,
+    String? donationHistoryId,
     BloodJourney? bloodJourney,
   }) {
     return EmergencyCommitment(
@@ -79,6 +83,7 @@ class EmergencyCommitment {
       committedAt: committedAt,
       lastLocationAt: lastLocationAt ?? this.lastLocationAt,
       donatedAt: donatedAt,
+      donationHistoryId: donationHistoryId ?? this.donationHistoryId,
       bloodJourney: bloodJourney ?? this.bloodJourney,
     );
   }

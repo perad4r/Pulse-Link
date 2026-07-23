@@ -507,16 +507,12 @@ class EmergencyController extends Controller
             return $journey->refresh()->load('hospital', 'steps');
         });
 
-        // Chỉ broadcast tới mobile khi journey đạt BƯỚC CUỐI và được công bố — đây là
-        // lúc bật màn cảm ơn cho người hiến. Các bước trung gian (tiếp nhận, kiểm tra
-        // chất lượng, vận chuyển...) không đẩy realtime.
-        // Lưu ý: KHÔNG gate thêm "!wasAlreadyCompleted" — để việc lưu lại bước cuối vẫn
-        // re-broadcast nếu mobile lỡ mất lần đầu. Notification vẫn được gate trong
-        // transaction nên không tạo thông báo trùng.
-        if ($willComplete) {
-            $commitment->refresh()->load('donor', 'alert', 'bloodJourney.steps');
-            $this->broadcastCommitment($commitment);
-        }
+        // Mọi bước đều được đẩy để Sổ hiến cập nhật ngay. Mobile phân biệt event
+        // hành trình với lần xác nhận hiến ban đầu nên các bước trung gian không
+        // mở lại thư PulseLink. Notification thư cuối vẫn chỉ được tạo một lần
+        // trong transaction khi hành trình thực sự chuyển sang hoàn tất.
+        $commitment->refresh()->load('donor', 'alert', 'bloodJourney.steps');
+        $this->broadcastCommitment($commitment);
 
         return BloodJourneyResource::make($journey);
     }

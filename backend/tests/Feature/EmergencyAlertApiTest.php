@@ -290,6 +290,17 @@ class EmergencyAlertApiTest extends TestCase
             'destination_type' => 'patient',
             'current_step' => 'emergency_transport',
         ])->assertOk();
+        Event::assertDispatched(
+            EmergencyCommitmentUpdated::class,
+            fn (EmergencyCommitmentUpdated $event): bool => data_get(
+                $event->broadcastWith(),
+                'commitment.blood_journey.current_step'
+            ) === 'emergency_transport'
+        );
+        $this->assertDatabaseMissing('mobile_notifications', [
+            'user_id' => $donor->id,
+            'type' => 'blood_journey_completed',
+        ]);
         $this->assertDatabaseHas('blood_stocks', [
             'donation_history_id' => $commitment->fresh()->donation_history_id,
             'status' => 'allocated',
@@ -299,6 +310,17 @@ class EmergencyAlertApiTest extends TestCase
             'destination_type' => 'patient',
             'current_step' => 'transfused',
         ])->assertOk();
+        Event::assertDispatched(
+            EmergencyCommitmentUpdated::class,
+            fn (EmergencyCommitmentUpdated $event): bool => data_get(
+                $event->broadcastWith(),
+                'commitment.blood_journey.current_step'
+            ) === 'transfused'
+        );
+        $this->assertDatabaseHas('mobile_notifications', [
+            'user_id' => $donor->id,
+            'type' => 'blood_journey_completed',
+        ]);
         $this->assertDatabaseHas('blood_stocks', [
             'donation_history_id' => $commitment->fresh()->donation_history_id,
             'status' => 'used',

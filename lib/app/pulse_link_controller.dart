@@ -81,6 +81,7 @@ class PulseLinkController extends ChangeNotifier {
   StreamSubscription<MobileNotification>? _notificationSubscription;
   Timer? _locationSyncTimer;
   bool _isSyncingEmergencyLocation = false;
+  int _donationHistoryRefreshGeneration = 0;
 
   /// Số hiệu phiên đăng nhập. Mỗi lần đăng xuất sẽ tăng lên để các tác vụ nạp
   /// hồ sơ đang chạy dở (initialize/refreshDailyData) không ghi đè lại state
@@ -567,14 +568,27 @@ class PulseLinkController extends ChangeNotifier {
       notification,
       profile: _state.profile,
     );
+    final isCompletedJourneyLetter = gratitude != null &&
+        (gratitude.source == GratitudeLetterSource.sosPatient ||
+            gratitude.source == GratitudeLetterSource.sosReserve);
+    final journeyAlreadyAcknowledged = isCompletedJourneyLetter &&
+        gratitude.bloodJourneyId != null &&
+        _state.acknowledgedJourneyIds.contains(gratitude.bloodJourneyId);
     final keepCompletedJourneyLetter = _shouldKeepCompletedJourneyLetter(
       gratitude,
     );
     _state = _state.copyWith(
       notifications: notifications,
       activeGratitudeLetter:
-          keepCompletedJourneyLetter ? _state.activeGratitudeLetter : gratitude,
+          keepCompletedJourneyLetter || journeyAlreadyAcknowledged
+              ? _state.activeGratitudeLetter
+              : gratitude,
     );
+    if (isCompletedJourneyLetter &&
+        !journeyAlreadyAcknowledged &&
+        gratitude.bloodJourneyId != null) {
+      unawaited(_markJourneyAcknowledged(gratitude.bloodJourneyId!));
+    }
     notifyListeners();
   }
 
@@ -618,7 +632,10 @@ class PulseLinkController extends ChangeNotifier {
       await _removeEmergencyAlert(alert.id);
       if (alert.currentCommitment?.status ==
           EmergencyCommitmentStatus.donated) {
-        _showSosDonationGratitude(alert.currentCommitment!, alert: alert);
+        _handleEmergencyCommitmentUpdate(
+          alert.currentCommitment!,
+          alert: alert,
+        );
       }
       return;
     }
@@ -1140,20 +1157,108 @@ class PulseLinkController extends ChangeNotifier {
     }
   }
 
-  void _handleEmergencyCommitmentUpdate(EmergencyCommitment commitment) {
-    if (commitment.status == EmergencyCommitmentStatus.donated) {
-      _showSosDonationGratitude(commitment);
-    } else if (commitment.status == EmergencyCommitmentStatus.cancelled ||
+  void _handleEmergencyCommitmentUpdate(
+    EmergencyCommitment commitment, {
+    EmergencyAlert? alert,
+  }) {
+    if (commitment.status == EmergencyCommitmentStatus.donated &&
+        _isActiveDonationTransition(commitment)) {
+      _showSosDonationGratitude(commitment, alert: alert);
+      return;
+    }
+
+    if (commitment.bloodJourney != null) {
+      _applyRealtimeBloodJourney(commitment);
+      return;
+    }
+
+    if (commitment.status == EmergencyCommitmentStatus.cancelled ||
         commitment.status == EmergencyCommitmentStatus.notNeeded) {
       _stopEmergencyLocationSync();
       unawaited(_removeEmergencyAlert(commitment.alertId));
-    } else if (_state.activeLiveBloodJourney != null &&
-        commitment.bloodJourney != null &&
-        commitment.bloodJourney!.id == _state.activeLiveBloodJourney!.id) {
-      _state = _state.copyWith(
-        activeLiveBloodJourney: commitment.bloodJourney,
+    }
+  }
+
+  bool _isActiveDonationTransition(EmergencyCommitment commitment) {
+    return _state.activeEmergencyCommitment?.id == commitment.id ||
+        _state.committedAlertIds.contains(commitment.alertId) ||
+        (_state.activeAlert?.id == commitment.alertId &&
+            _state.emergencyCommitted);
+  }
+
+  void _applyRealtimeBloodJourney(EmergencyCommitment commitment) {
+    final journey = commitment.bloodJourney!;
+    final history = List<PastDonation>.of(_state.donationHistory);
+    final historyIndex = history.indexWhere(
+      (donation) =>
+          (commitment.donationHistoryId != null &&
+              donation.id == commitment.donationHistoryId) ||
+          donation.bloodJourney?.id == journey.id,
+    );
+    final existingDonation = historyIndex >= 0 ? history[historyIndex] : null;
+    final activeJourney = _state.activeLiveBloodJourney;
+    final activeJourneyMatches = activeJourney?.id == journey.id;
+    final previousJourney = existingDonation?.bloodJourney ??
+        (activeJourneyMatches ? activeJourney : null);
+    final becameCompleted =
+        journey.completedAt != null && previousJourney?.completedAt == null;
+    final shouldPresentCompletionLetter =
+        becameCompleted && !_state.acknowledgedJourneyIds.contains(journey.id);
+
+    if (historyIndex >= 0) {
+      history[historyIndex] = existingDonation!.copyWith(
+        bloodJourney: journey,
       );
+    }
+
+    final letterDonation = historyIndex >= 0 ? history[historyIndex] : null;
+    _state = _state.copyWith(
+      donationHistory: history,
+      activeLiveBloodJourney:
+          activeJourneyMatches && !becameCompleted ? journey : null,
+      clearActiveLiveBloodJourney: activeJourneyMatches && becameCompleted,
+      clearActiveLiveBloodJourneyHospitalName:
+          activeJourneyMatches && becameCompleted,
+      clearActiveLiveBloodJourneyBloodType:
+          activeJourneyMatches && becameCompleted,
+      activeGratitudeLetter: shouldPresentCompletionLetter
+          ? GratitudeLetter.fromBloodJourney(
+              journey,
+              profile: _state.profile,
+              hospitalName: letterDonation?.locationName ??
+                  _state.activeLiveBloodJourneyHospitalName,
+              bloodType: letterDonation?.bloodType ??
+                  _state.activeLiveBloodJourneyBloodType,
+              volumeMl: letterDonation?.volumeMl ?? commitment.donationVolumeMl,
+              donatedAt: letterDonation?.donatedAt ?? commitment.donatedAt,
+              certificateId: letterDonation?.certificateId,
+            )
+          : null,
+    );
+
+    if (historyIndex < 0) {
+      unawaited(_refreshDonationHistoryFromRealtime());
+    }
+    if (becameCompleted) {
+      unawaited(_markJourneyAcknowledged(journey.id));
+    }
+    notifyListeners();
+  }
+
+  Future<void> _refreshDonationHistoryFromRealtime() async {
+    final epoch = _sessionEpoch;
+    final generation = ++_donationHistoryRefreshGeneration;
+    try {
+      final history = await _historyRepository.getDonationHistory();
+      if (epoch != _sessionEpoch ||
+          generation != _donationHistoryRefreshGeneration) {
+        return;
+      }
+      _state = _state.copyWith(donationHistory: history);
       notifyListeners();
+    } on Object {
+      // Realtime is an acceleration path. Pull-to-refresh remains available
+      // when a transient history request fails.
     }
   }
 
@@ -1254,13 +1359,24 @@ class PulseLinkController extends ChangeNotifier {
   /// Ghi nhận một journey đã được xem vào bộ nhớ cục bộ + state, không lặp lại.
   Future<void> _markJourneyAcknowledged(String journeyId) async {
     if (_state.acknowledgedJourneyIds.contains(journeyId)) return;
+    _state = _state.copyWith(
+      acknowledgedJourneyIds: {
+        ..._state.acknowledgedJourneyIds,
+        journeyId,
+      },
+    );
     try {
       final prefs = await SharedPreferences.getInstance();
       final acknowledged = prefs.getStringList(_acknowledgedJourneysKey) ?? [];
       if (!acknowledged.contains(journeyId)) {
         final newList = [...acknowledged, journeyId];
         await prefs.setStringList(_acknowledgedJourneysKey, newList);
-        _state = _state.copyWith(acknowledgedJourneyIds: newList.toSet());
+        _state = _state.copyWith(
+          acknowledgedJourneyIds: {
+            ..._state.acknowledgedJourneyIds,
+            ...newList,
+          },
+        );
       }
     } catch (e) {
       debugPrint('PulseLinkController: Error marking journey acknowledged: $e');
