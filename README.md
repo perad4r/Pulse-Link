@@ -381,6 +381,10 @@ Reverb phục vụ realtime cho Admin dashboard. Nếu Reverb chưa chạy, Admi
 
 ## Chạy Admin Vue
 
+> Admin dùng Vue Router history mode. Khi deploy VPS/Nginx, cấu hình `try_files` theo
+> `admin/deploy/nginx-spa.conf.example` để reload các URL như `/inventory` hoặc
+> `/sos/{id}` vẫn trả về `index.html` thay vì 404.
+
 Yêu cầu:
 
 - Node.js
