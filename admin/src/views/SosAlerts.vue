@@ -200,14 +200,14 @@ function closeCompletedModal() {
             <p class="mt-1 flex items-center gap-1 text-xs font-bold text-slate-400"><Clock3 class="h-3.5 w-3.5" /> Cập nhật {{ formatAlertTime(commitment.last_location_at) }}</p>
           </div>
           <div>
-            <p class="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">Trạng thái</p>
+            <p class="text-xs font-black uppercase tracking-[0.12em] text-slate-400">Trạng thái</p>
             <span
               class="mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-black"
               :class="commitment.status === 'en_route' ? 'bg-emerald-50 text-emerald-700' : commitment.status === 'donated' ? 'bg-amber-50 text-amber-700' : ['cancelled', 'not_needed'].includes(commitment.status) ? 'bg-slate-100 text-slate-500' : 'bg-sky-50 text-sky-700'"
             >{{ commitmentStatusLabels[commitment.status] }}</span>
           </div>
           <div>
-            <p class="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">Lượng máu / ETA</p>
+            <p class="text-xs font-black uppercase tracking-[0.12em] text-slate-400">Lượng máu / ETA</p>
             <p v-if="commitment.status === 'donated'" class="mt-1 text-sm font-black text-slate-900">{{ commitment.donation_volume_ml ?? 350 }} ml</p>
             <div v-else class="mt-1 flex items-center gap-2">
               <select v-model.number="donationVolumes[commitment.id]" class="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm font-black outline-none" :disabled="commitment.status === 'cancelled'" @blur="normalizeDonationVolume(commitment.id)">
@@ -217,7 +217,7 @@ function closeCompletedModal() {
             </div>
           </div>
           <div>
-            <p class="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">Hành trình máu</p>
+            <p class="text-xs font-black uppercase tracking-[0.12em] text-slate-400">Hành trình máu</p>
             <p v-if="commitment.status !== 'donated'" class="mt-1 text-sm font-semibold text-slate-400">Chờ xác nhận hiến</p>
             <span v-else class="mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-black" :class="isJourneyCompleted(commitment) ? 'bg-indigo-50 text-indigo-700' : 'bg-blue-50 text-blue-700'">{{ getJourneyStepLabel(commitment) }}</span>
           </div>
@@ -239,11 +239,11 @@ function closeCompletedModal() {
       <p v-else class="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">Chưa có người hiến cam kết cho ca đang chọn.</p>
     </section>
 
-    <div v-if="editingJourneyCommitment" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" @click.self="closeJourney">
+    <div v-if="editingJourneyCommitment" role="dialog" aria-modal="true" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" @click.self="closeJourney">
       <div class="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="text-[11px] font-black uppercase tracking-[0.16em] text-[#E31837]">Hành trình giọt máu</p>
+            <p class="text-xs font-black uppercase tracking-[0.16em] text-[#E31837]">Hành trình giọt máu</p>
             <h3 class="mt-1 text-xl font-black text-slate-950">{{ editingJourneyCommitment.donor?.name }}</h3>
           </div>
           <button class="grid h-9 w-9 place-items-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50" @click="closeJourney"><X class="h-5 w-5" /></button>
@@ -274,11 +274,11 @@ function closeCompletedModal() {
       </div>
     </div>
 
-    <div v-if="showCompletedModal" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm" @click.self="closeCompletedModal">
+    <div v-if="showCompletedModal" role="dialog" aria-modal="true" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm" @click.self="closeCompletedModal">
       <div class="max-h-[86vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Lịch sử vận hành</p>
+            <p class="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Lịch sử vận hành</p>
             <h3 class="mt-1 text-xl font-black text-slate-950">Các ca SOS đã hoàn thành</h3>
           </div>
           <button class="grid h-9 w-9 place-items-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50" @click="closeCompletedModal"><X class="h-5 w-5" /></button>

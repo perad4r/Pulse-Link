@@ -12,6 +12,7 @@ import type {
   SosPayload,
   Ward,
 } from '../types'
+import { apiFetch } from '../services/api'
 
 interface DashboardResponse {
   data: {
@@ -43,6 +44,9 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
   const selectedHospitalId = ref<number | null>(null)
   const selectedAlertId = ref<string | null>(null)
   const isLoading = ref(false)
+  const dashboardError = ref<string | null>(null)
+  const realtimeStatus = ref<'idle' | 'connecting' | 'connected' | 'disconnected' | 'error'>('idle')
+  const lastUpdatedAt = ref<Date | null>(null)
   const echo = ref<Echo<'reverb'> | null>(null)
   let dashboardRequestId = 0
 
@@ -77,9 +81,10 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
   async function loadDashboard() {
     const requestId = ++dashboardRequestId
     isLoading.value = true
+    dashboardError.value = null
     try {
       const params = normalizedSelectedHospitalId.value ? `?hospital_id=${normalizedSelectedHospitalId.value}` : ''
-      const response = await fetch(`${apiBaseUrl}/api/admin/dashboard${params}`)
+      const response = await apiFetch(`${apiBaseUrl}/api/admin/dashboard${params}`)
       
       if (response.status === 401) {
         localStorage.removeItem('admin_token')
@@ -103,9 +108,14 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
       alerts.value = payload.data.alerts
       commitments.value = payload.data.commitments
       currentAdmin.value = payload.data.current_admin ?? null
-      selectedHospitalId.value = selectedHospitalId.value ?? hospitals.value[0]?.id ?? null
+      if (!hospitals.value.some((hospital) => hospital.id === normalizedSelectedHospitalId.value)) {
+        selectedHospitalId.value = hospitals.value[0]?.id ?? null
+      }
       syncSelectedAlert()
       connectRealtime()
+      lastUpdatedAt.value = new Date()
+    } catch (error) {
+      dashboardError.value = error instanceof Error ? error.message : 'Không thể tải dữ liệu điều hành.'
     } finally {
       if (requestId === dashboardRequestId) {
         isLoading.value = false
@@ -114,7 +124,7 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
   }
 
   async function loadProvinces() {
-    const response = await fetch(`${apiBaseUrl}/api/locations/provinces`)
+    const response = await apiFetch(`${apiBaseUrl}/api/locations/provinces`)
     const payload = (await response.json()) as { data: Province[] }
     provinces.value = payload.data
   }
@@ -122,7 +132,7 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
   async function loadWards(provinceCode: string) {
     if (wardsByProvince.value[provinceCode]) return wardsByProvince.value[provinceCode]
 
-    const response = await fetch(`${apiBaseUrl}/api/locations/provinces/${provinceCode}/wards`)
+    const response = await apiFetch(`${apiBaseUrl}/api/locations/provinces/${provinceCode}/wards`)
     const payload = (await response.json()) as { data: Ward[] }
     wardsByProvince.value = {
       ...wardsByProvince.value,
@@ -133,7 +143,7 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
   }
 
   async function activateSos(payload: SosPayload) {
-    const response = await fetch(`${apiBaseUrl}/api/admin/emergency-alerts`, {
+    const response = await apiFetch(`${apiBaseUrl}/api/admin/emergency-alerts`, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -150,7 +160,7 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
   }
 
   async function cancelSos(alert: EmergencyAlert) {
-    const response = await fetch(`${apiBaseUrl}/api/admin/emergency-alerts/${alert.id}/cancel`, {
+    const response = await apiFetch(`${apiBaseUrl}/api/admin/emergency-alerts/${alert.id}/cancel`, {
       method: 'POST',
       headers: { Accept: 'application/json' },
     })
@@ -163,7 +173,7 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
   }
 
   async function completeSos(alert: EmergencyAlert) {
-    const response = await fetch(`${apiBaseUrl}/api/admin/emergency-alerts/${alert.id}/complete`, {
+    const response = await apiFetch(`${apiBaseUrl}/api/admin/emergency-alerts/${alert.id}/complete`, {
       method: 'POST',
       headers: { Accept: 'application/json' },
     })
@@ -176,7 +186,7 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
   }
 
   async function markCommitmentDonated(alert: EmergencyAlert, commitment: EmergencyCommitment, volumeMl: number) {
-    const response = await fetch(`${apiBaseUrl}/api/admin/emergency-alerts/${alert.id}/commitments/${commitment.id}/donated`, {
+    const response = await apiFetch(`${apiBaseUrl}/api/admin/emergency-alerts/${alert.id}/commitments/${commitment.id}/donated`, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -201,7 +211,7 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
       publish?: boolean
     },
   ) {
-    const response = await fetch(`${apiBaseUrl}/api/admin/emergency-alerts/${alert.id}/commitments/${commitment.id}/journey`, {
+    const response = await apiFetch(`${apiBaseUrl}/api/admin/emergency-alerts/${alert.id}/commitments/${commitment.id}/journey`, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -236,6 +246,7 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
   function connectRealtime() {
     if (!normalizedSelectedHospitalId.value || echo.value) return
 
+    realtimeStatus.value = 'connecting'
     window.Pusher = Pusher
     echo.value = new Echo({
       broadcaster: 'reverb',
@@ -246,6 +257,13 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
       forceTLS: (import.meta.env.VITE_REVERB_SCHEME ?? 'http') === 'https',
       enabledTransports: ['ws', 'wss'],
     })
+
+    const connection = (echo.value.connector as unknown as { pusher?: { connection?: { bind: (event: string, callback: () => void) => void } } }).pusher?.connection
+    connection?.bind('connected', () => { realtimeStatus.value = 'connected' })
+    connection?.bind('connecting', () => { realtimeStatus.value = 'connecting' })
+    connection?.bind('disconnected', () => { realtimeStatus.value = 'disconnected' })
+    connection?.bind('unavailable', () => { realtimeStatus.value = 'error' })
+    connection?.bind('error', () => { realtimeStatus.value = 'error' })
 
     echo.value
       .channel(`hospital.${normalizedSelectedHospitalId.value}`)
@@ -258,12 +276,14 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
           (total, alert) => total + (alert.recipients?.length ?? 0),
           0,
         )
+        lastUpdatedAt.value = new Date()
       })
       .listen('.emergency.commitment.updated', (event: { commitment: EmergencyCommitment }) => {
         if (!activeAlerts.value.some((alert) => alert.id === event.commitment.alert_id)) return
         upsertCommitment(event.commitment)
         stats.value.committed_donors = visibleCommitments.value.filter((commitment) => commitment.status !== 'cancelled').length
         stats.value.donated_donors = visibleCommitments.value.filter((commitment) => commitment.status === 'donated').length
+        lastUpdatedAt.value = new Date()
       })
   }
 
@@ -297,6 +317,7 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
     if (!echo.value) return
     echo.value.disconnect()
     echo.value = null
+    realtimeStatus.value = 'disconnected'
     connectRealtime()
   })
 
@@ -317,6 +338,9 @@ export function useEmergencyDashboard(apiBaseUrl: string) {
     selectedHospital,
     selectedAlertId,
     isLoading,
+    dashboardError,
+    realtimeStatus,
+    lastUpdatedAt,
     loadDashboard,
     loadProvinces,
     loadWards,

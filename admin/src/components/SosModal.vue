@@ -78,7 +78,7 @@ watch(
 </script>
 
 <template>
-  <div class="fixed inset-0 z-[2000] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 py-6 backdrop-blur-sm">
+  <div role="dialog" aria-modal="true" class="fixed inset-0 z-[2000] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4 py-6 backdrop-blur-sm">
     <form class="relative z-[2001] w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-2xl" @submit.prevent="submitSos">
       <div class="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
         <div class="p-5 pb-0">

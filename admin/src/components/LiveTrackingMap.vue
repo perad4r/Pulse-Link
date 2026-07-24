@@ -17,6 +17,8 @@ const emit = defineEmits<{
 const mapEl = ref<HTMLElement | null>(null)
 let map: L.Map | null = null
 let layerGroup: L.LayerGroup | null = null
+let resizeObserver: ResizeObserver | null = null
+let resizeFrame: number | null = null
 
 const statusLabels: Record<EmergencyCommitment['status'], string> = {
   committed: 'Đã cam kết',
@@ -44,9 +46,20 @@ onMounted(() => {
   }).addTo(map)
   layerGroup = L.layerGroup().addTo(map)
   renderMarkers()
+
+  resizeObserver = new ResizeObserver(() => {
+    if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame)
+    resizeFrame = window.requestAnimationFrame(() => {
+      resizeFrame = null
+      map?.invalidateSize({ animate: false })
+    })
+  })
+  resizeObserver.observe(mapEl.value)
 })
 
 onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame)
   map?.remove()
 })
 
@@ -129,7 +142,7 @@ function renderMarkers() {
 </script>
 
 <template>
-  <section class="relative z-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+  <section class="relative z-0 min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
     <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
       <div>
         <h2 class="text-base font-black text-slate-950">Bản đồ theo dõi tình nguyện viên</h2>
@@ -139,7 +152,7 @@ function renderMarkers() {
         {{ loading ? 'Đang đồng bộ' : 'Trực tuyến' }}
       </span>
     </div>
-    <div ref="mapEl" class="relative z-0 h-[500px]"></div>
+    <div ref="mapEl" class="relative z-0 h-[360px] w-full sm:h-[420px] xl:h-[500px]"></div>
   </section>
 </template>
 

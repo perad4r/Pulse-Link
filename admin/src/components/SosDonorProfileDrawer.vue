@@ -37,12 +37,12 @@ function formatDateTime(value?: string | null) {
 
 <template>
   <Teleport to="body">
-    <div v-if="commitment" class="fixed inset-0 z-[70]" @keydown.esc="emit('close')">
+    <div v-if="commitment" role="dialog" aria-modal="true" class="fixed inset-0 z-[70]" @keydown.esc="emit('close')">
       <div class="absolute inset-0 bg-slate-950/35 backdrop-blur-[1px]" @click="emit('close')" />
       <aside class="absolute inset-y-0 right-0 flex w-full max-w-md flex-col bg-white shadow-2xl">
         <header class="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
           <div class="min-w-0">
-            <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[#E31837]">Hồ sơ điều phối SOS</p>
+            <p class="text-xs font-black uppercase tracking-[0.18em] text-[#E31837]">Hồ sơ điều phối SOS</p>
             <h2 class="mt-1 truncate text-xl font-black text-slate-950">{{ donor?.name ?? 'Người hiến' }}</h2>
             <div class="mt-2 flex flex-wrap items-center gap-2">
               <span class="rounded-full bg-red-50 px-2.5 py-1 text-xs font-black text-[#E31837]">{{ donor?.blood_type ?? '--' }}</span>
@@ -59,17 +59,17 @@ function formatDateTime(value?: string | null) {
             <div class="rounded-lg bg-red-50 p-3">
               <Droplets class="h-4 w-4 text-[#E31837]" />
               <p class="mt-3 text-lg font-black text-slate-950">{{ donor?.blood_type ?? '--' }}</p>
-              <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Nhóm máu</p>
+              <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Nhóm máu</p>
             </div>
             <div class="rounded-lg bg-emerald-50 p-3">
               <Award class="h-4 w-4 text-emerald-600" />
               <p class="mt-3 text-lg font-black text-slate-950">{{ donor?.hero_level ?? '--' }}</p>
-              <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Cấp hiến</p>
+              <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Cấp hiến</p>
             </div>
             <div class="rounded-lg bg-slate-100 p-3">
               <HeartPulse class="h-4 w-4 text-slate-700" />
               <p class="mt-3 text-lg font-black text-slate-950">{{ donor?.total_donations ?? '--' }}</p>
-              <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Lần hiến</p>
+              <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Lần hiến</p>
             </div>
           </section>
 

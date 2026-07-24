@@ -92,7 +92,7 @@ function canCancel(alert: EmergencyAlert) {
             <AlertTriangle class="h-7 w-7" />
           </div>
           <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2 text-[11px] font-black uppercase tracking-[0.16em] text-white/75">
+            <div class="flex flex-wrap items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-white/75">
               <span class="rounded bg-black/15 px-2 py-1">{{ shortAlertId(activeAlert) }} · {{ activeAlert.required_blood_type }}</span>
               <span>Khởi tạo {{ formatTime(activeAlert.created_at) }}</span>
             </div>
@@ -102,11 +102,11 @@ function canCancel(alert: EmergencyAlert) {
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-3 rounded-xl border border-white/15 bg-black/10 p-3">
           <div class="border-r border-white/15 pr-3 text-center">
-            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">Cần thiết</p>
+            <p class="text-xs font-black uppercase tracking-[0.14em] text-white/70">Cần thiết</p>
             <p class="mt-1 text-2xl font-black">{{ activeAlert.units_needed }} đv</p>
           </div>
           <div class="border-r border-white/15 pr-3 text-center">
-            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">Đã nhận</p>
+            <p class="text-xs font-black uppercase tracking-[0.14em] text-white/70">Đã nhận</p>
             <p class="mt-1 text-2xl font-black text-amber-200">{{ donatedForSelectedAlert }}/{{ activeAlert.units_needed }}</p>
           </div>
           <button class="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-500 px-3 text-xs font-black uppercase tracking-wide shadow-sm transition hover:bg-emerald-400" @click="emit('completeAlert', activeAlert)">
@@ -161,24 +161,24 @@ function canCancel(alert: EmergencyAlert) {
 
     <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <article class="rounded-xl border border-red-100 bg-red-50/60 p-4">
-        <p class="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Số ca SOS</p>
+        <p class="text-xs font-black uppercase tracking-[0.12em] text-slate-500">Số ca SOS</p>
         <p class="mt-2 text-2xl font-black text-[#E31837]">{{ activeAlerts.length }}</p>
       </article>
       <article class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <p class="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Số lượt phát sóng</p>
+        <p class="text-xs font-black uppercase tracking-[0.12em] text-slate-500">Số lượt phát sóng</p>
         <p class="mt-2 text-2xl font-black text-slate-950">{{ recipientCount }}</p>
       </article>
       <article class="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
-        <p class="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Tình nguyện viên di chuyển</p>
+        <p class="text-xs font-black uppercase tracking-[0.12em] text-slate-500">Tình nguyện viên di chuyển</p>
         <p class="mt-2 text-2xl font-black text-emerald-600">{{ enRouteCount }}</p>
       </article>
       <article class="rounded-xl border border-amber-100 bg-amber-50/60 p-4">
-        <p class="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Đã hiến thành công</p>
+        <p class="text-xs font-black uppercase tracking-[0.12em] text-slate-500">Đã hiến thành công</p>
         <p class="mt-2 text-2xl font-black text-amber-600">{{ stats.donated_donors ?? donatedCount }}</p>
       </article>
     </section>
 
-    <section class="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(300px,0.7fr)]">
+    <section class="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(300px,0.7fr)]">
       <LiveTrackingMap
         :alert="activeAlert"
         :commitments="commitments"
@@ -193,7 +193,7 @@ function canCancel(alert: EmergencyAlert) {
             <h3 class="flex items-center gap-2 text-base font-black"><Radio class="h-5 w-5 text-[#E31837]" /> Sóng phát lệnh</h3>
             <p class="mt-1 text-xs font-semibold text-slate-400">Reverb cập nhật theo từng phản hồi điều phối.</p>
           </div>
-          <span class="rounded-md bg-[#E31837] px-2 py-1 text-[10px] font-black uppercase">Trực tiếp</span>
+          <span class="rounded-md bg-[#E31837] px-2 py-1 text-xs font-black uppercase">Trực tiếp</span>
         </div>
         <div class="mt-4 space-y-3">
           <article v-for="wave in waves" :key="wave.key" class="rounded-xl border border-white/10 bg-white/[0.035] p-3.5">
