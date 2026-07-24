@@ -15,6 +15,10 @@ import {
   X,
 } from '@lucide/vue'
 import type { AdminPermission, AdminUser, Hospital } from '../types'
+import { apiFetch } from '../services/api'
+import { confirmAction, notify } from '../composables/useAdminUi'
+import { parsePositiveInteger, useRouteQueryState } from '../composables/useRouteQueryState'
+import { useUnsavedChanges } from '../composables/useUnsavedChanges'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
 const staff = ref<AdminUser[]>([])
@@ -27,6 +31,11 @@ const editingStaff = ref<AdminUser | null>(null)
 const errorMessage = ref('')
 const currentPage = ref(1)
 const pageSize = 8
+const formBaseline = ref('')
+
+useRouteQueryState({
+  page: { source: currentPage, defaultValue: 1, parse: (value) => parsePositiveInteger(value), serialize: String },
+})
 
 const permissionOptions: Array<{ key: AdminPermission; label: string; description: string }> = [
   { key: 'dashboard.view', label: 'Xem dashboard', description: 'Theo dõi số liệu vận hành trong phạm vi được cấp.' },
@@ -44,6 +53,12 @@ const form = reactive({
   password: '',
   permissions: [] as AdminPermission[],
 })
+const isFormDirty = computed(() => showModal.value && JSON.stringify(form) !== formBaseline.value)
+useUnsavedChanges(isFormDirty)
+
+function markFormBaseline() {
+  formBaseline.value = JSON.stringify(form)
+}
 
 const systemAdmins = computed(() => staff.value.filter((member) => member.role === 'system_admin'))
 const hospitalStaff = computed(() => staff.value.filter((member) => member.role !== 'system_admin'))
@@ -76,13 +91,13 @@ function resetForm() {
 }
 
 async function loadHospitals() {
-  const response = await fetch(`${apiBaseUrl}/api/admin/dashboard`)
+  const response = await apiFetch(`${apiBaseUrl}/api/admin/dashboard`)
   const payload = (await response.json()) as { data: { hospitals: Hospital[] } }
   hospitals.value = payload.data.hospitals
 }
 
 async function loadStaff() {
-  const response = await fetch(`${apiBaseUrl}/api/admin/staff`)
+  const response = await apiFetch(`${apiBaseUrl}/api/admin/staff`)
   const payload = (await response.json()) as { data: AdminUser[] }
   staff.value = payload.data
   currentPage.value = Math.min(currentPage.value, totalPages.value)
@@ -100,6 +115,7 @@ async function loadData() {
 function openCreateModal() {
   editingStaff.value = null
   resetForm()
+  markFormBaseline()
   showModal.value = true
 }
 
@@ -114,6 +130,7 @@ function openEditModal(member: AdminUser) {
   form.hospitalId = member.hospital_id ?? hospitals.value[0]?.id ?? null
   form.password = ''
   form.permissions = [...member.permissions]
+  markFormBaseline()
   showModal.value = true
 }
 
@@ -141,7 +158,7 @@ async function submitStaff() {
     const endpoint = editingStaff.value
       ? `${apiBaseUrl}/api/admin/staff/${editingStaff.value.id}`
       : `${apiBaseUrl}/api/admin/staff`
-    const response = await fetch(endpoint, {
+    const response = await apiFetch(endpoint, {
       method: editingStaff.value ? 'PUT' : 'POST',
       headers: {
         Accept: 'application/json',
@@ -152,6 +169,7 @@ async function submitStaff() {
     if (!response.ok) await throwApiError(response)
 
     showModal.value = false
+    markFormBaseline()
     await loadStaff()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Không thể lưu nhân sự.'
@@ -160,17 +178,35 @@ async function submitStaff() {
   }
 }
 
+async function closeStaffModal() {
+  if (isFormDirty.value) {
+    const confirmed = await confirmAction({
+      title: 'Bỏ thay đổi phân quyền?',
+      message: 'Thông tin nhân sự và quyền đang chỉnh sửa chưa được lưu.',
+      confirmLabel: 'Bỏ thay đổi',
+    })
+    if (!confirmed) return
+  }
+  showModal.value = false
+}
+
 async function deleteStaff(member: AdminUser) {
   if (member.role === 'system_admin') return
-  if (!window.confirm(`Xóa nhân sự ${member.name}?`)) return
+  const confirmed = await confirmAction({
+    title: 'Xóa quyền truy cập nhân sự?',
+    message: `${member.name} sẽ không thể đăng nhập hoặc tiếp tục thao tác trong hệ thống admin.`,
+    confirmLabel: 'Xóa nhân sự',
+  })
+  if (!confirmed) return
 
-  const response = await fetch(`${apiBaseUrl}/api/admin/staff/${member.id}`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/admin/staff/${member.id}`, {
     method: 'DELETE',
     headers: { Accept: 'application/json' },
   })
   if (response.ok) {
     await loadStaff()
     currentPage.value = Math.min(currentPage.value, totalPages.value)
+    notify(`Đã xóa quyền truy cập của ${member.name}.`)
   }
 }
 
@@ -214,24 +250,24 @@ onMounted(() => {
 
     <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <article class="rounded-lg border border-slate-800 bg-slate-950 p-3 text-white">
-        <p class="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">System admin</p>
+        <p class="text-xs font-black uppercase tracking-[0.16em] text-slate-400">System admin</p>
         <div class="mt-2 flex items-end justify-between gap-3">
           <p class="text-2xl font-black">{{ systemAdmins.length }}</p>
-          <span class="rounded-full bg-white/10 px-2 py-1 text-[10px] font-black uppercase text-white">Toàn hệ thống</span>
+          <span class="rounded-full bg-white/10 px-2 py-1 text-xs font-black uppercase text-white">Toàn hệ thống</span>
         </div>
       </article>
       <article class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-        <p class="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Hospital staff</p>
+        <p class="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Hospital staff</p>
         <div class="mt-2 flex items-end justify-between gap-3">
           <p class="text-2xl font-black text-slate-950">{{ hospitalStaff.length }}</p>
-          <span class="rounded-full bg-red-50 px-2 py-1 text-[10px] font-black uppercase text-[#E31837]">Theo bệnh viện</span>
+          <span class="rounded-full bg-red-50 px-2 py-1 text-xs font-black uppercase text-[#E31837]">Theo bệnh viện</span>
         </div>
       </article>
       <article class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-        <p class="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Bệnh viện</p>
+        <p class="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Bệnh viện</p>
         <div class="mt-2 flex items-end justify-between gap-3">
           <p class="text-2xl font-black text-slate-950">{{ hospitals.length }}</p>
-          <span class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black uppercase text-slate-600">Đang hoạt động</span>
+          <span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-black uppercase text-slate-600">Đang hoạt động</span>
         </div>
       </article>
       <button
@@ -239,7 +275,7 @@ onMounted(() => {
         @click="showPermissionMatrix = true"
       >
         <span>
-          <span class="block text-[11px] font-black uppercase tracking-[0.16em]">Ma trận quyền</span>
+          <span class="block text-xs font-black uppercase tracking-[0.16em]">Ma trận quyền</span>
           <span class="mt-2 block text-sm font-black text-slate-950">{{ permissionOptions.length }} nhóm thao tác</span>
         </span>
         <KeyRound class="h-5 w-5 shrink-0" />
@@ -267,7 +303,7 @@ onMounted(() => {
         </div>
         <div v-else class="overflow-x-auto">
           <table class="w-full min-w-[1040px] text-left text-sm">
-            <thead class="bg-slate-50 text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">
+            <thead class="sticky top-0 z-10 bg-slate-50 text-xs font-black uppercase tracking-[0.16em] text-slate-500">
               <tr>
                 <th class="px-5 py-4">Nhân sự</th>
                 <th class="px-5 py-4">Phạm vi</th>
@@ -294,11 +330,11 @@ onMounted(() => {
                     <span
                       v-for="permission in member.permissions"
                       :key="permission"
-                      class="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600"
+                      class="rounded bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600"
                     >
                       {{ permission }}
                     </span>
-                    <span v-if="member.role === 'system_admin'" class="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                    <span v-if="member.role === 'system_admin'" class="rounded bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">
                       toàn quyền
                     </span>
                   </div>
@@ -367,7 +403,7 @@ onMounted(() => {
       </article>
     </section>
 
-    <div v-if="showPermissionMatrix" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+    <div v-if="showPermissionMatrix" role="dialog" aria-modal="true" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
       <aside class="w-full max-w-2xl rounded-lg bg-white shadow-2xl">
         <div class="flex items-center justify-between border-b border-slate-200 p-5">
           <h3 class="flex items-center gap-2 text-lg font-black text-slate-950">
@@ -381,21 +417,21 @@ onMounted(() => {
         <div class="grid max-h-[70vh] gap-3 overflow-y-auto p-5 md:grid-cols-2">
           <div v-for="permission in permissionOptions" :key="permission.key" class="rounded-md border border-slate-100 bg-slate-50 p-3">
             <p class="font-black text-slate-950">{{ permission.label }}</p>
-            <p class="mt-1 font-mono text-[11px] font-bold text-[#E31837]">{{ permission.key }}</p>
+            <p class="mt-1 font-mono text-xs font-bold text-[#E31837]">{{ permission.key }}</p>
             <p class="mt-2 text-xs leading-5 text-slate-500">{{ permission.description }}</p>
           </div>
         </div>
       </aside>
     </div>
 
-    <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+    <div v-if="showModal" role="dialog" aria-modal="true" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
       <form class="w-full max-w-2xl rounded-lg bg-white p-5 shadow-2xl" @submit.prevent="submitStaff">
         <div class="flex items-center justify-between border-b border-slate-200 pb-4">
           <h3 class="flex items-center gap-2 text-lg font-black text-slate-950">
             <UserCog class="h-5 w-5 text-[#E31837]" />
             {{ modalTitle }}
           </h3>
-          <button type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-100" @click="showModal = false">
+          <button type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-100" @click="closeStaffModal">
             <X class="h-4 w-4" />
           </button>
         </div>
@@ -458,7 +494,7 @@ onMounted(() => {
         </div>
 
         <div class="mt-5 flex justify-end gap-3">
-          <button type="button" class="rounded-md border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700" @click="showModal = false">Hủy</button>
+          <button type="button" class="rounded-md border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700" @click="closeStaffModal">Hủy</button>
           <button type="submit" class="inline-flex items-center gap-2 rounded-md bg-[#E31837] px-4 py-2 text-sm font-black text-white">
             <Loader2 v-if="isSaving" class="h-4 w-4 animate-spin" />
             Lưu nhân sự

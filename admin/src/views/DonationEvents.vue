@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, toRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Ban,
   ChevronLeft,
@@ -26,8 +27,14 @@ import type {
   UploadResponse,
   Ward,
 } from '../types'
+import { apiFetch } from '../services/api'
+import { confirmAction, notify, promptAction } from '../composables/useAdminUi'
+import { parsePositiveInteger, useRouteQueryState } from '../composables/useRouteQueryState'
+import { useUnsavedChanges } from '../composables/useUnsavedChanges'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
+const route = useRoute()
+const router = useRouter()
 const events = ref<DonationEvent[]>([])
 const selectedEvent = ref<DonationEvent | null>(null)
 const hospitals = ref<Hospital[]>([])
@@ -47,6 +54,8 @@ const appointmentSearch = ref('')
 const appointmentPage = ref(1)
 const appointmentPerPage = 8
 const openAppointmentActionId = ref<string | null>(null)
+const formBaseline = ref('')
+const eventDraftStorageKey = 'admin:draft:donation-event'
 
 const filters = reactive({
   q: '',
@@ -55,6 +64,23 @@ const filters = reactive({
   hospitalId: null as number | null,
   dateFrom: '',
   dateTo: '',
+})
+
+const { syncingFromRoute } = useRouteQueryState({
+  q: { source: toRef(filters, 'q'), defaultValue: '' },
+  status: { source: toRef(filters, 'status'), defaultValue: '' },
+  province: { source: toRef(filters, 'provinceCode'), defaultValue: '' },
+  hospital_id: {
+    source: toRef(filters, 'hospitalId'),
+    defaultValue: null,
+    parse: (value) => value && Number.isFinite(Number(value)) ? Number(value) : null,
+    serialize: String,
+  },
+  date_from: { source: toRef(filters, 'dateFrom'), defaultValue: '' },
+  date_to: { source: toRef(filters, 'dateTo'), defaultValue: '' },
+  page: { source: page, defaultValue: 1, parse: (value) => parsePositiveInteger(value), serialize: String },
+  appointment_q: { source: appointmentSearch, defaultValue: '' },
+  appointment_page: { source: appointmentPage, defaultValue: 1, parse: (value) => parsePositiveInteger(value), serialize: String },
 })
 
 const form = reactive({
@@ -76,6 +102,28 @@ const form = reactive({
   imageUrl: '',
   isPublished: true,
 })
+const isEventFormDirty = computed(() => showModal.value && JSON.stringify(form) !== formBaseline.value)
+useUnsavedChanges(isEventFormDirty)
+
+function markEventFormBaseline() {
+  formBaseline.value = JSON.stringify(form)
+}
+
+function restoreEventDraft() {
+  try {
+    const raw = sessionStorage.getItem(eventDraftStorageKey)
+    if (!raw) return
+    const draft = JSON.parse(raw) as { savedAt: number; form: Partial<typeof form> }
+    if (Date.now() - draft.savedAt > 12 * 60 * 60 * 1000) {
+      sessionStorage.removeItem(eventDraftStorageKey)
+      return
+    }
+    Object.assign(form, draft.form)
+    notify('Đã khôi phục bản nháp lịch hiến máu.', 'info')
+  } catch {
+    sessionStorage.removeItem(eventDraftStorageKey)
+  }
+}
 
 const completeForm = reactive({
   volumeMl: 350,
@@ -249,7 +297,7 @@ async function loadEvents() {
     if (filters.dateFrom) params.set('date_from', filters.dateFrom)
     if (filters.dateTo) params.set('date_to', filters.dateTo)
 
-    const response = await fetch(`${apiBaseUrl}/api/admin/donation-events?${params.toString()}`)
+    const response = await apiFetch(`${apiBaseUrl}/api/admin/donation-events?${params.toString()}`)
     if (!response.ok) await throwApiError(response)
     const payload = (await response.json()) as PaginatedResponse<DonationEvent>
     events.value = payload.data
@@ -264,19 +312,32 @@ async function loadEvents() {
   }
 }
 
-async function loadEventDetail(event: DonationEvent) {
-  const response = await fetch(`${apiBaseUrl}/api/admin/donation-events/${event.id}`)
+async function loadEventDetail(event: DonationEvent | string | number, updateRoute = true, preserveAppointmentState = false) {
+  const eventId = typeof event === 'object' ? event.id : event
+  const response = await apiFetch(`${apiBaseUrl}/api/admin/donation-events/${eventId}`)
   if (!response.ok) await throwApiError(response)
   const payload = (await response.json()) as { data: DonationEvent }
   selectedEvent.value = payload.data
-  appointmentSearch.value = ''
-  appointmentPage.value = 1
+  if (!preserveAppointmentState) {
+    appointmentSearch.value = ''
+    appointmentPage.value = 1
+  }
   syncAppointmentVolumeSelections()
+  if (updateRoute && String(route.params.eventId ?? '') !== String(eventId)) {
+    await router.push({ name: 'events', params: { eventId: String(eventId) }, query: route.query })
+  }
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
+function closeEventDetail() {
+  selectedEvent.value = null
+  appointmentSearch.value = ''
+  appointmentPage.value = 1
+  void router.push({ name: 'events', query: route.query })
+}
+
 async function loadHospitals() {
-  const response = await fetch(`${apiBaseUrl}/api/admin/dashboard`)
+  const response = await apiFetch(`${apiBaseUrl}/api/admin/dashboard`)
   const payload = (await response.json()) as { data: { hospitals: Hospital[] } }
   hospitals.value = payload.data.hospitals
   if (!filters.hospitalId && hospitals.value.length === 1) filters.hospitalId = hospitals.value[0].id
@@ -284,7 +345,7 @@ async function loadHospitals() {
 }
 
 async function loadProvinces() {
-  const response = await fetch(`${apiBaseUrl}/api/locations/provinces`)
+  const response = await apiFetch(`${apiBaseUrl}/api/locations/provinces`)
   const payload = (await response.json()) as { data: Province[] }
   provinces.value = payload.data
 }
@@ -294,7 +355,7 @@ async function loadWards(provinceCode: string) {
     wards.value = []
     return
   }
-  const response = await fetch(`${apiBaseUrl}/api/locations/provinces/${provinceCode}/wards`)
+  const response = await apiFetch(`${apiBaseUrl}/api/locations/provinces/${provinceCode}/wards`)
   const payload = (await response.json()) as { data: Ward[] }
   wards.value = payload.data
   if (!wards.value.some((ward) => ward.code === form.wardCode)) {
@@ -305,6 +366,8 @@ async function loadWards(provinceCode: string) {
 function openCreateModal() {
   editingEvent.value = null
   resetForm()
+  markEventFormBaseline()
+  restoreEventDraft()
   showModal.value = true
   void loadWards(form.provinceCode)
 }
@@ -329,6 +392,7 @@ function openEditModal(event: DonationEvent) {
   form.urgency = event.urgency
   form.imageUrl = event.image_url ?? ''
   form.isPublished = event.is_published
+  markEventFormBaseline()
   showModal.value = true
   void loadWards(form.provinceCode)
 }
@@ -344,7 +408,7 @@ async function uploadImage(event: Event) {
     const body = new FormData()
     body.append('file', file)
 
-    const response = await fetch(`${apiBaseUrl}/api/admin/uploads`, {
+    const response = await apiFetch(`${apiBaseUrl}/api/admin/uploads`, {
       method: 'POST',
       headers: { Accept: 'application/json' },
       body,
@@ -403,7 +467,7 @@ async function submitEvent() {
     const endpoint = editingEvent.value
       ? `${apiBaseUrl}/api/admin/donation-events/${editingEvent.value.id}`
       : `${apiBaseUrl}/api/admin/donation-events`
-    const response = await fetch(endpoint, {
+    const response = await apiFetch(endpoint, {
       method: editingEvent.value ? 'PUT' : 'POST',
       headers: {
         Accept: 'application/json',
@@ -414,6 +478,8 @@ async function submitEvent() {
     if (!response.ok) await throwApiError(response)
 
     showModal.value = false
+    sessionStorage.removeItem(eventDraftStorageKey)
+    markEventFormBaseline()
     await loadEvents()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Không thể lưu lịch hiến máu.'
@@ -423,9 +489,21 @@ async function submitEvent() {
 }
 
 async function cancelEvent(event: DonationEvent) {
-  if (!window.confirm(`Hủy lịch hiến máu "${event.title}"?`)) return
-  const cancelReason = window.prompt('Lý do hủy sự kiện', 'Sự kiện được hủy bởi bệnh viện.') ?? undefined
-  const response = await fetch(`${apiBaseUrl}/api/admin/donation-events/${event.id}`, {
+  const confirmed = await confirmAction({
+    title: 'Hủy lịch hiến máu?',
+    message: `“${event.title}” sẽ ngừng nhận đăng ký mới. Các lượt đã đặt cần được đơn vị tổ chức chủ động thông báo.`,
+    confirmLabel: 'Hủy lịch',
+  })
+  if (!confirmed) return
+  const cancelReason = await promptAction({
+    title: 'Ghi nhận lý do hủy lịch',
+    message: 'Lý do này phục vụ đối soát vận hành và hỗ trợ thông báo tới người đã đăng ký.',
+    label: 'Lý do hủy',
+    initialValue: 'Sự kiện được hủy bởi bệnh viện.',
+    confirmLabel: 'Tiếp tục hủy',
+  })
+  if (cancelReason === null) return
+  const response = await apiFetch(`${apiBaseUrl}/api/admin/donation-events/${event.id}`, {
     method: 'DELETE',
     headers: {
       Accept: 'application/json',
@@ -436,11 +514,12 @@ async function cancelEvent(event: DonationEvent) {
   if (!response.ok) await throwApiError(response)
   await loadEvents()
   if (selectedEvent.value?.id === event.id) await loadEventDetail(event)
+  notify('Đã hủy lịch hiến máu.', 'warning')
 }
 
 async function appointmentAction(appointment: DonationAppointment, action: 'check-in' | 'cancel' | 'no-show' | 'defer' | 'publish-result', body: Record<string, unknown> = {}) {
   if (!selectedEvent.value) return
-  const response = await fetch(`${apiBaseUrl}/api/admin/donation-events/${selectedEvent.value.id}/appointments/${appointment.id}/${action}`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/admin/donation-events/${selectedEvent.value.id}/appointments/${appointment.id}/${action}`, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -454,18 +533,36 @@ async function appointmentAction(appointment: DonationAppointment, action: 'chec
 }
 
 async function deferAppointment(appointment: DonationAppointment) {
-  const screeningNotes = window.prompt('Lý do tạm hoãn', appointment.screening_notes ?? '')
+  const screeningNotes = await promptAction({
+    title: 'Tạm hoãn lượt hiến',
+    message: 'Ghi rõ lý do sàng lọc để nhân viên ca sau có đủ ngữ cảnh.',
+    label: 'Lý do tạm hoãn',
+    initialValue: appointment.screening_notes ?? '',
+    confirmLabel: 'Xác nhận tạm hoãn',
+  })
   if (screeningNotes === null) return
   await appointmentAction(appointment, 'defer', { screening_notes: screeningNotes })
 }
 
 async function noShowAppointment(appointment: DonationAppointment) {
-  if (!window.confirm('Đánh dấu người này không đến hiến máu?')) return
+  const confirmed = await confirmAction({
+    title: 'Đánh dấu người hiến không đến?',
+    message: 'Trạng thái này ảnh hưởng báo cáo tỷ lệ tham dự của sự kiện.',
+    confirmLabel: 'Xác nhận không đến',
+  })
+  if (!confirmed) return
   await appointmentAction(appointment, 'no-show')
+  notify('Đã cập nhật trạng thái không đến.', 'info')
 }
 
 async function cancelAppointment(appointment: DonationAppointment) {
-  const cancelReason = window.prompt('Lý do hủy lịch', appointment.cancel_reason ?? '')
+  const cancelReason = await promptAction({
+    title: 'Hủy lượt đăng ký',
+    message: 'Ghi nhận lý do để lịch sử điều phối không bị thiếu thông tin.',
+    label: 'Lý do hủy lịch',
+    initialValue: appointment.cancel_reason ?? '',
+    confirmLabel: 'Xác nhận hủy',
+  })
   if (cancelReason === null) return
   await appointmentAction(appointment, 'cancel', { cancel_reason: cancelReason })
 }
@@ -517,7 +614,15 @@ function openCompleteModal(appointment: DonationAppointment) {
   showCompleteModal.value = true
 }
 
-function closeEventModal() {
+async function closeEventModal() {
+  if (isEventFormDirty.value) {
+    const confirmed = await confirmAction({
+      title: 'Đóng lịch hiến đang soạn?',
+      message: 'Các trường đã nhập sẽ được giữ thành bản nháp tạm trong phiên trình duyệt.',
+      confirmLabel: 'Đóng và giữ nháp',
+    })
+    if (!confirmed) return
+  }
   showModal.value = false
 }
 
@@ -527,7 +632,7 @@ function closeCompleteModal() {
 
 async function submitCompletion() {
   if (!selectedEvent.value || !completingAppointment.value) return
-  const response = await fetch(`${apiBaseUrl}/api/admin/donation-events/${selectedEvent.value.id}/appointments/${completingAppointment.value.id}/complete`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/admin/donation-events/${selectedEvent.value.id}/appointments/${completingAppointment.value.id}/complete`, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -557,7 +662,6 @@ async function throwApiError(response: Response): Promise<never> {
 function goToPage(nextPage: number) {
   if (nextPage < 1 || nextPage > meta.value.last_page || nextPage === page.value) return
   page.value = nextPage
-  void loadEvents()
 }
 
 function goToAppointmentPage(nextPage: number) {
@@ -590,13 +694,25 @@ watch(
   },
 )
 
-watch(filters, () => {
-  page.value = 1
+watch([
+  () => filters.q,
+  () => filters.status,
+  () => filters.provinceCode,
+  () => filters.hospitalId,
+  () => filters.dateFrom,
+  () => filters.dateTo,
+  page,
+], (values, previousValues) => {
+  const filtersChanged = values.slice(0, 6).some((value, index) => value !== previousValues[index])
+  if (!syncingFromRoute.value && filtersChanged && page.value !== 1) {
+    page.value = 1
+    return
+  }
   void loadEvents()
-})
+}, { deep: true })
 
 watch(appointmentSearch, () => {
-  appointmentPage.value = 1
+  if (!syncingFromRoute.value) appointmentPage.value = 1
   openAppointmentActionId.value = null
 })
 
@@ -606,10 +722,26 @@ watch(appointmentPageCount, (pageCount) => {
   }
 })
 
+watch(form, () => {
+  if (!showModal.value || editingEvent.value || !isEventFormDirty.value) return
+  sessionStorage.setItem(eventDraftStorageKey, JSON.stringify({ savedAt: Date.now(), form: { ...form } }))
+}, { deep: true })
+
 onMounted(async () => {
   await Promise.all([loadHospitals(), loadProvinces()])
   resetForm()
   await loadEvents()
+  if (typeof route.params.eventId === 'string' && route.params.eventId) {
+    await loadEventDetail(route.params.eventId, false, true)
+  }
+})
+
+watch(() => route.params.eventId, (eventId) => {
+  if (typeof eventId === 'string' && eventId && String(selectedEvent.value?.id ?? '') !== eventId) {
+    void loadEventDetail(eventId, false, true)
+  } else if (!eventId) {
+    selectedEvent.value = null
+  }
 })
 </script>
 
@@ -670,7 +802,7 @@ onMounted(async () => {
             <col style="width: 12%" />
             <col style="width: 15%" />
           </colgroup>
-          <thead class="whitespace-nowrap border-b border-slate-200 bg-slate-50 text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">
+          <thead class="sticky top-0 z-10 whitespace-nowrap border-b border-slate-200 bg-slate-50 text-xs font-black uppercase tracking-[0.14em] text-slate-400">
             <tr>
               <th class="px-4 py-3">Sự kiện</th>
               <th class="px-4 py-3">Bệnh viện</th>
@@ -738,7 +870,7 @@ onMounted(async () => {
           <p class="mt-1 text-sm font-semibold text-slate-500">{{ selectedEvent.location_name }} · {{ formatDateTime(selectedEvent.starts_at) }}</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <button class="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 px-3 text-xs font-black uppercase text-slate-600 hover:bg-slate-50" @click="selectedEvent = null">
+          <button class="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 px-3 text-xs font-black uppercase text-slate-600 hover:bg-slate-50" @click="closeEventDetail">
             <ChevronLeft class="h-4 w-4" />
             Quay lại
           </button>
@@ -754,12 +886,12 @@ onMounted(async () => {
       </div>
 
       <div class="mt-4 grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr))">
-        <div class="rounded-md bg-slate-50 p-3"><p class="text-[11px] font-black uppercase text-slate-400">Đã đặt</p><p class="mt-1 text-xl font-black">{{ appointmentStats.booked }}</p></div>
-        <div class="rounded-md bg-blue-50 p-3"><p class="text-[11px] font-black uppercase text-blue-400">Check-in</p><p class="mt-1 text-xl font-black text-blue-700">{{ appointmentStats.checked_in }}</p></div>
-        <div class="rounded-md bg-amber-50 p-3"><p class="text-[11px] font-black uppercase text-amber-500">Tạm hoãn</p><p class="mt-1 text-xl font-black text-amber-700">{{ appointmentStats.deferred }}</p></div>
-        <div class="rounded-md bg-slate-50 p-3"><p class="text-[11px] font-black uppercase text-slate-400">Không đến</p><p class="mt-1 text-xl font-black">{{ appointmentStats.no_show }}</p></div>
-        <div class="rounded-md bg-emerald-50 p-3"><p class="text-[11px] font-black uppercase text-emerald-500">Hoàn thành</p><p class="mt-1 text-xl font-black text-emerald-700">{{ appointmentStats.completed }}</p></div>
-        <div class="rounded-md bg-red-50 p-3"><p class="text-[11px] font-black uppercase text-red-400">Tổng ml</p><p class="mt-1 text-xl font-black text-[#E31837]">{{ appointmentStats.total_volume_ml }}</p></div>
+        <div class="rounded-md bg-slate-50 p-3"><p class="text-xs font-black uppercase text-slate-400">Đã đặt</p><p class="mt-1 text-xl font-black">{{ appointmentStats.booked }}</p></div>
+        <div class="rounded-md bg-blue-50 p-3"><p class="text-xs font-black uppercase text-blue-400">Check-in</p><p class="mt-1 text-xl font-black text-blue-700">{{ appointmentStats.checked_in }}</p></div>
+        <div class="rounded-md bg-amber-50 p-3"><p class="text-xs font-black uppercase text-amber-500">Tạm hoãn</p><p class="mt-1 text-xl font-black text-amber-700">{{ appointmentStats.deferred }}</p></div>
+        <div class="rounded-md bg-slate-50 p-3"><p class="text-xs font-black uppercase text-slate-400">Không đến</p><p class="mt-1 text-xl font-black">{{ appointmentStats.no_show }}</p></div>
+        <div class="rounded-md bg-emerald-50 p-3"><p class="text-xs font-black uppercase text-emerald-500">Hoàn thành</p><p class="mt-1 text-xl font-black text-emerald-700">{{ appointmentStats.completed }}</p></div>
+        <div class="rounded-md bg-red-50 p-3"><p class="text-xs font-black uppercase text-red-400">Tổng ml</p><p class="mt-1 text-xl font-black text-[#E31837]">{{ appointmentStats.total_volume_ml }}</p></div>
       </div>
 
       <div class="mt-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 lg:flex-row lg:items-center lg:justify-between">
@@ -782,7 +914,7 @@ onMounted(async () => {
             <col style="width: 20%" />
             <col style="width: 15%" />
           </colgroup>
-          <thead class="bg-slate-50 text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">
+          <thead class="sticky top-0 z-10 bg-slate-50 text-xs font-black uppercase tracking-[0.14em] text-slate-400">
             <tr>
               <th class="px-4 py-3">Người đăng ký</th>
               <th class="px-4 py-3">Trạng thái</th>
@@ -820,7 +952,7 @@ onMounted(async () => {
                   :href="appointment.certificate.certificate_verify_url"
                   target="_blank"
                   rel="noreferrer"
-                  class="mt-1 inline-flex items-center rounded-full bg-red-50 px-2 py-1 text-[11px] font-black text-[#E31837] transition hover:bg-[#E31837] hover:text-white"
+                  class="mt-1 inline-flex items-center rounded-full bg-red-50 px-2 py-1 text-xs font-black text-[#E31837] transition hover:bg-[#E31837] hover:text-white"
                 >
                   {{ appointment.certificate.certificate_id }}
                 </a>
@@ -867,7 +999,7 @@ onMounted(async () => {
       </div>
     </section>
 
-    <div v-if="showModal" class="fixed inset-0 z-[2000] grid place-items-center bg-slate-950/50 p-4" @click="closeEventModal">
+    <div v-if="showModal" role="dialog" aria-modal="true" class="fixed inset-0 z-[2000] grid place-items-center bg-slate-950/50 p-4" @click="closeEventModal">
       <form class="w-full max-w-3xl rounded-lg bg-white shadow-2xl" @click.stop @submit.prevent="submitEvent">
         <div class="flex items-center justify-between border-b border-slate-200 p-4">
           <h3 class="text-lg font-black text-slate-950">{{ modalTitle }}</h3>
@@ -919,7 +1051,7 @@ onMounted(async () => {
       </form>
     </div>
 
-    <div v-if="showCompleteModal && completingAppointment" class="fixed inset-0 z-[2100] grid place-items-center bg-slate-950/50 p-4" @click="closeCompleteModal">
+    <div v-if="showCompleteModal && completingAppointment" role="dialog" aria-modal="true" class="fixed inset-0 z-[2100] grid place-items-center bg-slate-950/50 p-4" @click="closeCompleteModal">
       <form class="w-full max-w-xl rounded-lg bg-white shadow-2xl" @click.stop @submit.prevent="submitCompletion">
         <div class="flex items-center justify-between border-b border-slate-200 p-4">
           <h3 class="text-lg font-black text-slate-950">Hoàn thành hiến máu</h3>

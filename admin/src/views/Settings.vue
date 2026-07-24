@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { apiFetch } from '../services/api'
 import { onMounted, ref } from 'vue'
 import { Cpu, Save, RefreshCw, AlertCircle, CheckCircle2, Sliders } from '@lucide/vue'
 
@@ -42,7 +43,7 @@ async function fetchSettings() {
   isLoading.value = true
   saveError.value = null
   try {
-    const res = await fetch(`${apiBase}/api/admin/settings`)
+    const res = await apiFetch(`${apiBase}/api/admin/settings`)
     if (!res.ok) throw new Error('Không thể tải cấu hình AI.')
     const json = await res.json()
     settings.value = {
@@ -62,7 +63,7 @@ async function handleSave() {
   saveError.value = null
   saveSuccess.value = false
   try {
-    const res = await fetch(`${apiBase}/api/admin/settings`, {
+    const res = await apiFetch(`${apiBase}/api/admin/settings`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -110,7 +111,7 @@ async function testConnection(provider: 'gemini' | 'groq') {
   }
 
   try {
-    const res = await fetch(`${apiBase}/api/admin/settings/test-ai`, {
+    const res = await apiFetch(`${apiBase}/api/admin/settings/test-ai`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -184,7 +185,7 @@ onMounted(() => {
               <option value="gemini">Google Gemini Flash (Khuyên dùng)</option>
               <option value="groq">Groq AI (Mô hình Llama 3)</option>
             </select>
-            <p class="mt-1 text-[11px] font-semibold text-slate-400">
+            <p class="mt-1 text-xs font-semibold text-slate-400">
               Hệ thống sẽ mặc định gọi đến provider này. Nếu lỗi hoặc hết hạn mức, hệ thống tự động fallback sang provider kia.
             </p>
           </div>
@@ -200,7 +201,7 @@ onMounted(() => {
               class="w-full h-11 rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-700 outline-none focus:border-[#E31837] focus:bg-white"
               placeholder="0 (Không giới hạn)"
             />
-            <p class="mt-1 text-[11px] font-semibold text-slate-400">
+            <p class="mt-1 text-xs font-semibold text-slate-400">
               Nhập 0 hoặc bỏ trống nếu không muốn giới hạn. Tránh spam và kiểm soát chi phí API.
             </p>
           </div>

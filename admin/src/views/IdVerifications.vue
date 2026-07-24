@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { ShieldCheck, AlertCircle, CheckCircle, XCircle, Clock, Eye } from '@lucide/vue'
+import { apiFetch } from '../services/api'
+import { confirmAction, notify } from '../composables/useAdminUi'
+import { useRouteQueryState } from '../composables/useRouteQueryState'
 
 const props = defineProps<{
   apiBaseUrl: string
@@ -32,6 +35,16 @@ const errorMsg = ref<string | null>(null)
 const successMsg = ref<string | null>(null)
 const statusFilter = ref<'pending' | 'verified' | 'rejected' | 'all'>('pending')
 
+useRouteQueryState({
+  status: {
+    source: statusFilter,
+    defaultValue: 'pending',
+    parse: (value) => ['pending', 'verified', 'rejected', 'all'].includes(value ?? '')
+      ? value as typeof statusFilter.value
+      : 'pending',
+  },
+})
+
 // Ảnh phóng to
 const previewUrl = ref<string | null>(null)
 
@@ -59,7 +72,7 @@ async function fetchItems() {
   isLoading.value = true
   errorMsg.value = null
   try {
-    const res = await fetch(`${props.apiBaseUrl}/api/admin/id-verifications?status=${statusFilter.value}`)
+    const res = await apiFetch(`${props.apiBaseUrl}/api/admin/id-verifications?status=${statusFilter.value}`)
     if (!res.ok) throw new Error('Không thể tải danh sách xác thực căn cước.')
     const payload = await res.json()
     items.value = payload.data
@@ -71,16 +84,23 @@ async function fetchItems() {
 }
 
 async function approve(user: IdVerification) {
-  if (!confirm(`Xác nhận đã kiểm tra và duyệt căn cước của "${user.name}"?`)) return
+  const confirmed = await confirmAction({
+    title: 'Duyệt căn cước người hiến?',
+    message: `Xác nhận hồ sơ của “${user.name}” đã được đối chiếu chính xác với giấy tờ gốc.`,
+    confirmLabel: 'Duyệt hồ sơ',
+    tone: 'primary',
+  })
+  if (!confirmed) return
   errorMsg.value = null
   successMsg.value = null
   try {
-    const res = await fetch(`${props.apiBaseUrl}/api/admin/id-verifications/${user.id}/approve`, {
+    const res = await apiFetch(`${props.apiBaseUrl}/api/admin/id-verifications/${user.id}/approve`, {
       method: 'POST',
       headers: { Accept: 'application/json' },
     })
     if (!res.ok) throw new Error('Không thể duyệt hồ sơ.')
     successMsg.value = `Đã xác thực căn cước cho ${user.name}.`
+    notify(successMsg.value)
     await fetchItems()
   } catch (e: any) {
     errorMsg.value = e.message
@@ -101,7 +121,7 @@ async function submitReject() {
   errorMsg.value = null
   successMsg.value = null
   try {
-    const res = await fetch(`${props.apiBaseUrl}/api/admin/id-verifications/${rejectingUser.value.id}/reject`, {
+    const res = await apiFetch(`${props.apiBaseUrl}/api/admin/id-verifications/${rejectingUser.value.id}/reject`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason: rejectReason.value.trim() }),
@@ -117,7 +137,6 @@ async function submitReject() {
 
 function setFilter(f: typeof statusFilter.value) {
   statusFilter.value = f
-  fetchItems()
 }
 
 function formatDate(dateStr: string | null) {
@@ -126,6 +145,7 @@ function formatDate(dateStr: string | null) {
 }
 
 onMounted(fetchItems)
+watch(statusFilter, fetchItems)
 </script>
 
 <template>
@@ -176,7 +196,7 @@ onMounted(fetchItems)
           <div class="space-y-1">
             <div class="flex items-center gap-2">
               <span class="font-black text-slate-900">{{ u.name }}</span>
-              <span class="rounded px-2 py-0.5 text-[11px] font-bold" :class="statusMeta[u.id_verification_status].class">
+              <span class="rounded px-2 py-0.5 text-xs font-bold" :class="statusMeta[u.id_verification_status].class">
                 {{ statusMeta[u.id_verification_status].label }}
               </span>
             </div>
@@ -184,7 +204,7 @@ onMounted(fetchItems)
             <div class="text-xs text-slate-500">
               CCCD: <span class="font-bold text-slate-700">{{ u.national_id ?? '-' }}</span>
               · Nhóm máu: <span class="font-bold text-slate-700">{{ u.blood_type ?? '-' }}</span>
-              <span class="ml-1 rounded px-2 py-0.5 text-[11px] font-bold" :class="bloodTypeStatusMeta[u.blood_type_verification_status ?? 'unreported'].class">
+              <span class="ml-1 rounded px-2 py-0.5 text-xs font-bold" :class="bloodTypeStatusMeta[u.blood_type_verification_status ?? 'unreported'].class">
                 {{ bloodTypeStatusMeta[u.blood_type_verification_status ?? 'unreported'].label }}
               </span>
               <span v-if="u.blood_type_verified_at" class="ml-1 text-slate-400">({{ formatDate(u.blood_type_verified_at) }})</span>
@@ -218,7 +238,7 @@ onMounted(fetchItems)
         <!-- ID card images -->
         <div class="mt-4 grid grid-cols-2 gap-3 sm:max-w-md">
           <div v-for="(img, idx) in [{ url: u.id_card_front_url, label: 'Mặt trước' }, { url: u.id_card_back_url, label: 'Mặt sau' }]" :key="idx">
-            <div class="text-[11px] font-bold text-slate-400 uppercase mb-1">{{ img.label }}</div>
+            <div class="text-xs font-bold text-slate-400 uppercase mb-1">{{ img.label }}</div>
             <div
               v-if="img.url"
               class="group relative aspect-[8/5] cursor-pointer overflow-hidden rounded-xl border border-slate-200"
@@ -238,12 +258,12 @@ onMounted(fetchItems)
     </div>
 
     <!-- Image preview modal -->
-    <div v-if="previewUrl" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6" @click="previewUrl = null">
+    <div v-if="previewUrl" role="dialog" aria-modal="true" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6" @click="previewUrl = null">
       <img :src="previewUrl" alt="CCCD" class="max-h-[85vh] max-w-full rounded-xl" />
     </div>
 
     <!-- Reject reason modal -->
-    <div v-if="rejectingUser" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+    <div v-if="rejectingUser" role="dialog" aria-modal="true" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
         <h3 class="text-lg font-black text-slate-900 uppercase tracking-wide mb-1">Từ chối hồ sơ</h3>
         <p class="text-sm text-slate-500 mb-4">Nhập lý do để người dùng biết cần chỉnh sửa gì khi nộp lại.</p>

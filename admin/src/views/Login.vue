@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { apiFetch } from '../services/api'
 import { ref } from 'vue'
 import { AlertTriangle, KeyRound, Mail } from '@lucide/vue'
 import pulseLinkIcon from '../assets/pulse_link_icon.png'
@@ -25,7 +26,7 @@ async function handleLogin() {
   isLoading.value = true
 
   try {
-    const response = await fetch(`${apiBaseUrl}/api/auth/login`, {
+    const response = await apiFetch(`${apiBaseUrl}/api/auth/login`, {
       method: 'POST',
       headers: {
         'Accept': 'application/json',
@@ -66,7 +67,7 @@ async function handleLogin() {
       <h2 class="mt-6 text-2xl font-black uppercase tracking-wider">
         PULSE <span class="text-[#E31837]">LINK</span>
       </h2>
-      <p class="mt-1.5 text-xs font-bold uppercase tracking-[0.25em] text-neutral-500">Mạch Sống - Điều phối khẩn cấp</p>
+      <p class="mt-1.5 text-xs font-bold uppercase tracking-[0.25em] text-neutral-400">Mạch Sống - Điều phối khẩn cấp</p>
     </div>
 
     <form @submit.prevent="handleLogin" class="mt-8 space-y-5">
@@ -76,7 +77,7 @@ async function handleLogin() {
       </div>
 
       <div>
-        <label for="email" class="block text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">Email quản trị</label>
+        <label for="email" class="block text-xs font-black uppercase tracking-[0.14em] text-slate-400">Email quản trị</label>
         <div class="relative mt-1.5">
           <Mail class="absolute left-3 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-slate-500" />
           <input
@@ -91,7 +92,7 @@ async function handleLogin() {
       </div>
 
       <div>
-        <label for="password" class="block text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">Mật khẩu</label>
+        <label for="password" class="block text-xs font-black uppercase tracking-[0.14em] text-slate-400">Mật khẩu</label>
         <div class="relative mt-1.5">
           <KeyRound class="absolute left-3 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-slate-500" />
           <input
@@ -115,15 +116,15 @@ async function handleLogin() {
       </button>
 
       <div class="mt-6 border-t border-slate-800/80 pt-5">
-        <p class="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500 mb-2.5 text-center">Tài khoản thử nghiệm (Click để điền)</p>
-        <div class="grid grid-cols-2 gap-2 text-[11px] font-bold">
+        <p class="text-xs font-black uppercase tracking-[0.14em] text-slate-400 mb-2.5 text-center">Tài khoản thử nghiệm (bấm để điền)</p>
+        <div class="grid grid-cols-2 gap-2 text-xs font-bold">
           <button
             type="button"
             class="flex flex-col items-center justify-center p-2 rounded bg-slate-900 border border-slate-800/60 transition hover:border-[#E31837] hover:bg-slate-900/80"
             @click="fillCredentials('system@pulselink.test')"
           >
             <span class="text-white">System Admin</span>
-            <span class="text-[9px] text-slate-500 font-medium">system@pulselink.test</span>
+            <span class="text-xs text-slate-400 font-medium">system@pulselink.test</span>
           </button>
           <button
             type="button"
@@ -131,7 +132,7 @@ async function handleLogin() {
             @click="fillCredentials('admin@pulselink.test')"
           >
             <span class="text-white">Hospital Admin</span>
-            <span class="text-[9px] text-slate-500 font-medium">admin@pulselink.test</span>
+            <span class="text-xs text-slate-400 font-medium">admin@pulselink.test</span>
           </button>
         </div>
       </div>

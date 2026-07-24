@@ -15,6 +15,10 @@ import {
   X,
 } from '@lucide/vue'
 import type { CommunityPost, Hospital, PaginatedResponse, PaginationMeta, Province, UploadResponse, Ward } from '../types'
+import { apiFetch } from '../services/api'
+import { parsePositiveInteger, useRouteQueryState } from '../composables/useRouteQueryState'
+import { confirmAction, notify } from '../composables/useAdminUi'
+import { useUnsavedChanges } from '../composables/useUnsavedChanges'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
 const posts = ref<CommunityPost[]>([])
@@ -31,6 +35,14 @@ const searchKeyword = ref('')
 const statusFilter = ref('')
 const page = ref(1)
 const meta = ref<PaginationMeta>({ current_page: 1, last_page: 1, per_page: 10, total: 0 })
+const formBaseline = ref('')
+const draftStorageKey = 'admin:draft:community-post'
+
+const { syncingFromRoute } = useRouteQueryState({
+  q: { source: searchKeyword, defaultValue: '' },
+  status: { source: statusFilter, defaultValue: '' },
+  page: { source: page, defaultValue: 1, parse: (value) => parsePositiveInteger(value), serialize: String },
+})
 
 const form = reactive({
   hospitalId: null as number | null,
@@ -45,6 +57,30 @@ const form = reactive({
   provinceCode: '79',
   wardCode: '',
 })
+const isFormDirty = computed(() => showModal.value && JSON.stringify(form) !== formBaseline.value)
+useUnsavedChanges(isFormDirty)
+
+function markFormBaseline() {
+  formBaseline.value = JSON.stringify(form)
+}
+
+function restorePostDraft() {
+  try {
+    const raw = sessionStorage.getItem(draftStorageKey)
+    if (!raw) return false
+    const draft = JSON.parse(raw) as { savedAt: number; form: Partial<typeof form> }
+    if (Date.now() - draft.savedAt > 12 * 60 * 60 * 1000) {
+      sessionStorage.removeItem(draftStorageKey)
+      return false
+    }
+    Object.assign(form, draft.form)
+    notify('Đã khôi phục bản nháp bài viết trong phiên trước.', 'info')
+    return true
+  } catch {
+    sessionStorage.removeItem(draftStorageKey)
+    return false
+  }
+}
 
 const modalTitle = computed(() => (editingPost.value ? 'Sửa bài viết cộng đồng' : 'Tạo bài viết cộng đồng'))
 const publishedPostsOnPage = computed(() => posts.value.filter((post) => post.status === 'published').length)
@@ -87,7 +123,7 @@ async function loadPosts() {
     if (statusFilter.value) params.set('status', statusFilter.value)
     if (searchKeyword.value.trim()) params.set('q', searchKeyword.value.trim())
 
-    const response = await fetch(`${apiBaseUrl}/api/admin/community-posts?${params.toString()}`)
+    const response = await apiFetch(`${apiBaseUrl}/api/admin/community-posts?${params.toString()}`)
     const payload = (await response.json()) as PaginatedResponse<CommunityPost>
     posts.value = payload.data
     meta.value = payload.meta
@@ -98,14 +134,14 @@ async function loadPosts() {
 }
 
 async function loadHospitals() {
-  const response = await fetch(`${apiBaseUrl}/api/admin/dashboard`)
+  const response = await apiFetch(`${apiBaseUrl}/api/admin/dashboard`)
   const payload = (await response.json()) as { data: { hospitals: Hospital[] } }
   hospitals.value = payload.data.hospitals
   if (!form.hospitalId) form.hospitalId = hospitals.value[0]?.id ?? null
 }
 
 async function loadProvinces() {
-  const response = await fetch(`${apiBaseUrl}/api/locations/provinces`)
+  const response = await apiFetch(`${apiBaseUrl}/api/locations/provinces`)
   const payload = (await response.json()) as { data: Province[] }
   provinces.value = payload.data
 }
@@ -116,7 +152,7 @@ async function loadWards(provinceCode: string) {
     return
   }
 
-  const response = await fetch(`${apiBaseUrl}/api/locations/provinces/${provinceCode}/wards`)
+  const response = await apiFetch(`${apiBaseUrl}/api/locations/provinces/${provinceCode}/wards`)
   const payload = (await response.json()) as { data: Ward[] }
   wards.value = payload.data
   if (!wards.value.some((ward) => ward.code === form.wardCode)) {
@@ -127,6 +163,8 @@ async function loadWards(provinceCode: string) {
 function openCreateModal() {
   editingPost.value = null
   resetForm()
+  markFormBaseline()
+  restorePostDraft()
   showModal.value = true
   void loadWards(form.provinceCode)
 }
@@ -145,6 +183,7 @@ function openEditModal(post: CommunityPost) {
   form.targetHeroLevel = post.target_hero_level ?? 'Gold Badge'
   form.provinceCode = post.province_code ?? '79'
   form.wardCode = post.ward_code ?? ''
+  markFormBaseline()
   showModal.value = true
   void loadWards(form.provinceCode)
 }
@@ -159,7 +198,7 @@ async function uploadImage(event: Event) {
     const body = new FormData()
     body.append('file', file)
 
-    const response = await fetch(`${apiBaseUrl}/api/admin/uploads`, {
+    const response = await apiFetch(`${apiBaseUrl}/api/admin/uploads`, {
       method: 'POST',
       headers: { Accept: 'application/json' },
       body,
@@ -201,7 +240,7 @@ async function submitPost(status: CommunityPost['status']) {
     const endpoint = editingPost.value
       ? `${apiBaseUrl}/api/admin/community-posts/${editingPost.value.id}`
       : `${apiBaseUrl}/api/admin/community-posts`
-    const response = await fetch(endpoint, {
+    const response = await apiFetch(endpoint, {
       method: editingPost.value ? 'PUT' : 'POST',
       headers: {
         Accept: 'application/json',
@@ -212,12 +251,26 @@ async function submitPost(status: CommunityPost['status']) {
     if (!response.ok) await throwApiError(response)
 
     showModal.value = false
+    sessionStorage.removeItem(draftStorageKey)
+    markFormBaseline()
     await loadPosts()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Không thể lưu bài viết.'
   } finally {
     isSaving.value = false
   }
+}
+
+async function closePostModal() {
+  if (isFormDirty.value) {
+    const confirmed = await confirmAction({
+      title: 'Đóng bài viết đang soạn?',
+      message: 'Nội dung chưa lưu sẽ được giữ làm bản nháp tạm trong phiên trình duyệt.',
+      confirmLabel: 'Đóng và giữ nháp',
+    })
+    if (!confirmed) return
+  }
+  showModal.value = false
 }
 
 async function throwApiError(response: Response): Promise<never> {
@@ -229,7 +282,6 @@ async function throwApiError(response: Response): Promise<never> {
 function goToPage(nextPage: number) {
   if (nextPage < 1 || nextPage > meta.value.last_page || nextPage === page.value) return
   page.value = nextPage
-  void loadPosts()
 }
 
 watch(
@@ -239,10 +291,18 @@ watch(
   },
 )
 
-watch([searchKeyword, statusFilter], () => {
-  page.value = 1
+watch([searchKeyword, statusFilter, page], ([search, status], [previousSearch, previousStatus]) => {
+  if (!syncingFromRoute.value && (search !== previousSearch || status !== previousStatus) && page.value !== 1) {
+    page.value = 1
+    return
+  }
   void loadPosts()
 })
+
+watch(form, () => {
+  if (!showModal.value || editingPost.value || !isFormDirty.value) return
+  sessionStorage.setItem(draftStorageKey, JSON.stringify({ savedAt: Date.now(), form: { ...form } }))
+}, { deep: true })
 
 onMounted(async () => {
   await Promise.all([loadHospitals(), loadProvinces(), loadPosts()])
@@ -316,7 +376,7 @@ onMounted(async () => {
       </div>
       <div v-else class="overflow-x-auto">
         <table class="w-full min-w-[980px] text-left text-sm">
-          <thead class="bg-slate-50 text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">
+          <thead class="sticky top-0 z-10 bg-slate-50 text-xs font-black uppercase tracking-[0.16em] text-slate-500">
             <tr>
               <th class="px-5 py-4">Bài viết</th>
               <th class="px-5 py-4">Đối tượng nhận tin</th>
@@ -331,7 +391,7 @@ onMounted(async () => {
               <td class="px-5 py-4">
                 <p class="font-black text-slate-950">{{ post.title }}</p>
                 <p class="mt-1 line-clamp-2 max-w-xl text-xs text-slate-500">{{ post.excerpt ?? post.slug }}</p>
-                <p class="mt-2 text-[11px] font-semibold text-slate-400">{{ formattedDate(post.published_at) }}</p>
+                <p class="mt-2 text-xs font-semibold text-slate-400">{{ formattedDate(post.published_at) }}</p>
               </td>
               <td class="px-5 py-4 text-slate-600">{{ post.audience_label }}</td>
               <td class="px-5 py-4 text-slate-600">{{ post.hospital?.name ?? 'Toàn hệ thống' }}</td>
@@ -366,14 +426,14 @@ onMounted(async () => {
       </div>
     </section>
 
-    <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+    <div v-if="showModal" role="dialog" aria-modal="true" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
       <form class="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-lg bg-white p-5 shadow-2xl" @submit.prevent="submitPost(form.status)">
         <div class="flex items-center justify-between border-b border-slate-200 pb-4">
           <h3 class="flex items-center gap-2 text-lg font-black text-slate-950">
             <FileText class="h-5 w-5 text-[#E31837]" />
             {{ modalTitle }}
           </h3>
-          <button type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-100" @click="showModal = false">
+          <button type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-100" @click="closePostModal">
             <X class="h-4 w-4" />
           </button>
         </div>
@@ -488,7 +548,7 @@ onMounted(async () => {
         </div>
 
         <div class="mt-5 flex flex-wrap justify-end gap-3">
-          <button type="button" class="rounded-md border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700" @click="showModal = false">Hủy</button>
+          <button type="button" class="rounded-md border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700" @click="closePostModal">Hủy</button>
           <button type="button" class="inline-flex items-center gap-2 rounded-md border border-slate-200 px-4 py-2 text-sm font-black text-slate-700" @click="submitPost('draft')">
             <Loader2 v-if="isSaving && form.status === 'draft'" class="h-4 w-4 animate-spin" />
             <Save v-else class="h-4 w-4" />

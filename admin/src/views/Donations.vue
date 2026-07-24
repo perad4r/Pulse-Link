@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { apiFetch } from '../services/api'
+import { confirmAction, notify } from '../composables/useAdminUi'
 import { ref, onMounted, computed } from 'vue'
 import { Plus, Trash2, Edit, Eye, HeartHandshake, AlertCircle, CheckCircle, XCircle, ImagePlus, Loader2 } from '@lucide/vue'
 
@@ -78,7 +80,7 @@ const activeCampaignsCount = computed(() => {
 async function fetchCampaigns() {
   isLoading.value = true
   try {
-    const res = await fetch(`${props.apiBaseUrl}/api/admin/campaigns`)
+    const res = await apiFetch(`${props.apiBaseUrl}/api/admin/campaigns`)
     if (!res.ok) throw new Error('Không thể tải danh sách chiến dịch.')
     const payload = await res.json()
     campaigns.value = payload.data
@@ -94,12 +96,12 @@ async function viewTransactions(campaign: Campaign) {
   showTxModal.value = true
   isLoadingTx.value = true
   try {
-    const res = await fetch(`${props.apiBaseUrl}/api/admin/campaigns/${campaign.id}/transactions`)
+    const res = await apiFetch(`${props.apiBaseUrl}/api/admin/campaigns/${campaign.id}/transactions`)
     if (!res.ok) throw new Error('Không thể tải lịch sử quyên góp.')
     const payload = await res.json()
     transactions.value = payload.data
   } catch (e: any) {
-    alert(e.message)
+    notify(e.message, 'error')
   } finally {
     isLoadingTx.value = false
   }
@@ -161,7 +163,7 @@ async function submitForm() {
   const method = isEdit ? 'PUT' : 'POST'
 
   try {
-    const res = await fetch(url, {
+    const res = await apiFetch(url, {
       method,
       headers: {
         Accept: 'application/json',
@@ -191,7 +193,7 @@ async function uploadImage(event: Event) {
     const fd = new FormData()
     fd.append('file', file)
 
-    const res = await fetch(`${props.apiBaseUrl}/api/admin/uploads`, {
+    const res = await apiFetch(`${props.apiBaseUrl}/api/admin/uploads`, {
       method: 'POST',
       headers: { Accept: 'application/json' },
       body: fd,
@@ -208,15 +210,20 @@ async function uploadImage(event: Event) {
 }
 
 async function deleteCampaign(campaign: Campaign) {
-  if (!confirm(`Bạn có chắc chắn muốn xóa chiến dịch "${campaign.title}" không?`)) return
+  const confirmed = await confirmAction({
+    title: 'Xóa chiến dịch quyên góp?',
+    message: `“${campaign.title}” sẽ bị xóa khỏi danh sách quản lý. Hãy chắc chắn chiến dịch không còn giao dịch cần đối soát.`,
+    confirmLabel: 'Xóa chiến dịch',
+  })
+  if (!confirmed) return
   try {
-    const res = await fetch(`${props.apiBaseUrl}/api/admin/campaigns/${campaign.id}`, {
+    const res = await apiFetch(`${props.apiBaseUrl}/api/admin/campaigns/${campaign.id}`, {
       method: 'DELETE',
     })
     if (!res.ok) throw new Error('Không thể xóa chiến dịch.')
     await fetchCampaigns()
   } catch (e: any) {
-    alert(e.message)
+    notify(e.message, 'error')
   }
 }
 
@@ -283,8 +290,8 @@ onMounted(() => {
     <!-- Campaign list table -->
     <div class="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
       <table class="w-full text-left border-collapse">
-        <thead>
-          <tr class="border-b border-slate-200 bg-slate-50 text-[11px] font-black uppercase tracking-wider text-slate-500">
+        <thead class="sticky top-0 z-10 bg-slate-50">
+          <tr class="border-b border-slate-200 bg-slate-50 text-xs font-black uppercase tracking-wider text-slate-500">
             <th class="p-4">Tên chiến dịch</th>
             <th class="p-4">Quỹ quyên góp (VND)</th>
             <th class="p-4">Thời hạn</th>
@@ -296,11 +303,11 @@ onMounted(() => {
           <tr v-for="c in campaigns" :key="c.id" class="hover:bg-slate-50/50 transition">
             <td class="p-4 font-bold text-slate-900">
               <div>{{ c.title }}</div>
-              <div class="text-[11px] text-slate-500 font-normal line-clamp-1 mt-1">{{ c.description }}</div>
+              <div class="text-xs text-slate-500 font-normal line-clamp-1 mt-1">{{ c.description }}</div>
             </td>
             <td class="p-4">
               <div class="font-bold text-emerald-600">{{ formatCurrency(c.current_amount) }}</div>
-              <div class="text-[11px] text-slate-500 mt-0.5">Mục tiêu: {{ formatCurrency(c.target_amount) }}</div>
+              <div class="text-xs text-slate-500 mt-0.5">Mục tiêu: {{ formatCurrency(c.target_amount) }}</div>
             </td>
             <td class="p-4 text-slate-500">{{ formatDate(c.expires_at) }}</td>
             <td class="p-4">
@@ -330,7 +337,7 @@ onMounted(() => {
     </div>
 
     <!-- Add/Edit Campaign Modal -->
-    <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+    <div v-if="showModal" role="dialog" aria-modal="true" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <form @submit.prevent="submitForm" class="flex w-full max-w-lg flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl max-h-[90vh]">
         <div class="px-6 pt-6 pb-4 border-b border-slate-100">
           <h3 class="text-lg font-black text-slate-900 uppercase tracking-wide">
@@ -358,7 +365,7 @@ onMounted(() => {
               <input v-model="formExpiresAt" type="date" class="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-[#E31837] focus:ring-2 focus:ring-red-50" />
             </div>
           </div>
-          <p class="text-[11px] text-slate-500 -mt-1">
+          <p class="text-xs text-slate-500 -mt-1">
             Người dùng có thể góp bằng tiền mặt hoặc điểm Hero — điểm sẽ tự quy đổi ra VND (1 điểm = 250đ) và cộng vào cùng quỹ này.
           </p>
 
@@ -387,7 +394,7 @@ onMounted(() => {
               <HeartHandshake class="h-4 w-4" />
               <span class="text-xs font-black uppercase tracking-wide">Câu chuyện hoàn cảnh</span>
             </div>
-            <p class="text-[11px] text-slate-500 -mt-2">
+            <p class="text-xs text-slate-500 -mt-2">
               Cho người quyên góp biết họ đang giúp ai và mỗi khoản đóng góp dùng vào việc gì. Có thể bỏ trống.
             </p>
 
@@ -420,7 +427,7 @@ onMounted(() => {
             <div>
               <label class="block text-xs font-bold text-slate-500 uppercase mb-1">VND cho 1 đơn vị tác động</label>
               <input v-model.number="formImpactPerUnitAmount" type="number" min="0" class="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-[#E31837] focus:ring-2 focus:ring-red-50" placeholder="Ví dụ: 35000" />
-              <p class="text-[11px] text-slate-400 mt-1">Số tiền để tạo ra một đơn vị tác động, dùng hiển thị "≈ N {{ formImpactUnit || 'đơn vị' }}" cho người quyên góp.</p>
+              <p class="text-xs text-slate-400 mt-1">Số tiền để tạo ra một đơn vị tác động, dùng hiển thị "≈ N {{ formImpactUnit || 'đơn vị' }}" cho người quyên góp.</p>
             </div>
           </div>
 
@@ -442,7 +449,7 @@ onMounted(() => {
     </div>
 
     <!-- View Transactions Modal -->
-    <div v-if="showTxModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+    <div v-if="showTxModal" role="dialog" aria-modal="true" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div class="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl flex flex-col max-h-[85vh]">
         <div class="flex items-center justify-between border-b border-slate-100 pb-4">
           <h3 class="text-base font-black text-slate-900 uppercase tracking-wide">
@@ -455,8 +462,8 @@ onMounted(() => {
           <div v-if="isLoadingTx" class="text-center py-8 text-slate-400 font-bold">Đang tải lịch sử giao dịch...</div>
           <div v-else class="overflow-x-auto">
             <table class="w-full text-left text-sm border-collapse">
-              <thead>
-                <tr class="border-b border-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-500">
+              <thead class="sticky top-0 z-10 bg-slate-50">
+                <tr class="border-b border-slate-200 text-xs font-black uppercase tracking-wider text-slate-500">
                   <th class="pb-2">Người ủng hộ</th>
                   <th class="pb-2">Đóng góp</th>
                   <th class="pb-2">Phương thức</th>
@@ -469,7 +476,7 @@ onMounted(() => {
                 <tr v-for="t in transactions" :key="t.id" class="hover:bg-slate-50/50">
                   <td class="py-2.5">
                     <div class="font-bold text-slate-900">{{ t.donor_name }}</div>
-                    <div class="text-[10px] text-slate-400 italic mt-0.5">{{ t.message || 'Không có lời chúc.' }}</div>
+                    <div class="text-xs text-slate-400 italic mt-0.5">{{ t.message || 'Không có lời chúc.' }}</div>
                   </td>
                   <td class="py-2.5 font-bold">
                     <span v-if="t.amount > 0" class="text-emerald-600">+{{ formatCurrency(t.amount) }}</span>

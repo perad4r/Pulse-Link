@@ -13,6 +13,10 @@ import {
   X,
 } from '@lucide/vue'
 import type { Hospital, PaginatedResponse, PaginationMeta, Province, Ward } from '../types'
+import { apiFetch } from '../services/api'
+import { confirmAction, notify } from '../composables/useAdminUi'
+import { parsePositiveInteger, useRouteQueryState } from '../composables/useRouteQueryState'
+import { useUnsavedChanges } from '../composables/useUnsavedChanges'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
 const hospitals = ref<Hospital[]>([])
@@ -27,6 +31,13 @@ const searchKeyword = ref('')
 const statusFilter = ref('')
 const page = ref(1)
 const meta = ref<PaginationMeta>({ current_page: 1, last_page: 1, per_page: 10, total: 0 })
+const formBaseline = ref('')
+
+const { syncingFromRoute } = useRouteQueryState({
+  q: { source: searchKeyword, defaultValue: '' },
+  status: { source: statusFilter, defaultValue: '' },
+  page: { source: page, defaultValue: 1, parse: (value) => parsePositiveInteger(value), serialize: String },
+})
 
 const statusFilters = [
   { value: '', label: 'Tất cả trạng thái' },
@@ -46,6 +57,12 @@ const form = reactive({
   contactEmail: '',
   isActive: true,
 })
+const isFormDirty = computed(() => showModal.value && JSON.stringify(form) !== formBaseline.value)
+useUnsavedChanges(isFormDirty)
+
+function markFormBaseline() {
+  formBaseline.value = JSON.stringify(form)
+}
 
 const modalTitle = computed(() => (editingHospital.value ? 'Sửa bệnh viện' : 'Thêm bệnh viện'))
 const activeCountOnPage = computed(() => hospitals.value.filter((hospital) => hospital.is_active).length)
@@ -78,7 +95,7 @@ async function loadHospitals() {
     if (searchKeyword.value.trim()) params.set('q', searchKeyword.value.trim())
     if (statusFilter.value) params.set('status', statusFilter.value)
 
-    const response = await fetch(`${apiBaseUrl}/api/admin/hospitals?${params.toString()}`)
+    const response = await apiFetch(`${apiBaseUrl}/api/admin/hospitals?${params.toString()}`)
     const payload = (await response.json()) as PaginatedResponse<Hospital>
     hospitals.value = payload.data
     meta.value = payload.meta
@@ -89,7 +106,7 @@ async function loadHospitals() {
 }
 
 async function loadProvinces() {
-  const response = await fetch(`${apiBaseUrl}/api/locations/provinces`)
+  const response = await apiFetch(`${apiBaseUrl}/api/locations/provinces`)
   const payload = (await response.json()) as { data: Province[] }
   provinces.value = payload.data
 }
@@ -100,7 +117,7 @@ async function loadWards(provinceCode: string) {
     return
   }
 
-  const response = await fetch(`${apiBaseUrl}/api/locations/provinces/${provinceCode}/wards`)
+  const response = await apiFetch(`${apiBaseUrl}/api/locations/provinces/${provinceCode}/wards`)
   const payload = (await response.json()) as { data: Ward[] }
   wards.value = payload.data
   if (!wards.value.some((ward) => ward.code === form.wardCode)) {
@@ -111,6 +128,7 @@ async function loadWards(provinceCode: string) {
 function openCreateModal() {
   editingHospital.value = null
   resetForm()
+  markFormBaseline()
   showModal.value = true
   void loadWards(form.provinceCode)
 }
@@ -128,6 +146,7 @@ function openEditModal(hospital: Hospital) {
   form.contactPhone = hospital.contact_phone ?? ''
   form.contactEmail = hospital.contact_email ?? ''
   form.isActive = hospital.is_active ?? true
+  markFormBaseline()
   showModal.value = true
   void loadWards(form.provinceCode)
 }
@@ -156,7 +175,7 @@ async function submitHospital() {
     const endpoint = editingHospital.value
       ? `${apiBaseUrl}/api/admin/hospitals/${editingHospital.value.id}`
       : `${apiBaseUrl}/api/admin/hospitals`
-    const response = await fetch(endpoint, {
+    const response = await apiFetch(endpoint, {
       method: editingHospital.value ? 'PUT' : 'POST',
       headers: {
         Accept: 'application/json',
@@ -167,6 +186,7 @@ async function submitHospital() {
     if (!response.ok) await throwApiError(response)
 
     showModal.value = false
+    markFormBaseline()
     await loadHospitals()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Không thể lưu bệnh viện.'
@@ -175,14 +195,37 @@ async function submitHospital() {
   }
 }
 
-async function deactivateHospital(hospital: Hospital) {
-  if (!window.confirm(`Ngưng hoạt động ${hospital.name}?`)) return
+async function closeHospitalModal() {
+  if (isFormDirty.value) {
+    const confirmed = await confirmAction({
+      title: 'Bỏ thay đổi bệnh viện?',
+      message: 'Thông tin đang chỉnh sửa chưa được lưu.',
+      confirmLabel: 'Bỏ thay đổi',
+    })
+    if (!confirmed) return
+  }
+  showModal.value = false
+}
 
-  const response = await fetch(`${apiBaseUrl}/api/admin/hospitals/${hospital.id}`, {
-    method: 'DELETE',
-    headers: { Accept: 'application/json' },
+async function deactivateHospital(hospital: Hospital) {
+  const confirmed = await confirmAction({
+    title: 'Ngưng hoạt động bệnh viện?',
+    message: `${hospital.name} sẽ không còn xuất hiện trong các luồng điều phối mới. Dữ liệu lịch sử vẫn được giữ nguyên.`,
+    confirmLabel: 'Ngưng hoạt động',
   })
-  if (response.ok) await loadHospitals()
+  if (!confirmed) return
+
+  try {
+    const response = await apiFetch(`${apiBaseUrl}/api/admin/hospitals/${hospital.id}`, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
+    })
+    if (!response.ok) await throwApiError(response)
+    await loadHospitals()
+    notify(`Đã ngưng hoạt động ${hospital.name}.`)
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Không thể cập nhật bệnh viện.', 'error')
+  }
 }
 
 async function throwApiError(response: Response): Promise<never> {
@@ -194,7 +237,6 @@ async function throwApiError(response: Response): Promise<never> {
 function goToPage(nextPage: number) {
   if (nextPage < 1 || nextPage > meta.value.last_page || nextPage === page.value) return
   page.value = nextPage
-  void loadHospitals()
 }
 
 watch(
@@ -209,8 +251,11 @@ watch(
   },
 )
 
-watch([searchKeyword, statusFilter], () => {
-  page.value = 1
+watch([searchKeyword, statusFilter, page], ([search, status], [previousSearch, previousStatus]) => {
+  if (!syncingFromRoute.value && (search !== previousSearch || status !== previousStatus) && page.value !== 1) {
+    page.value = 1
+    return
+  }
   void loadHospitals()
 })
 
@@ -287,7 +332,7 @@ onMounted(async () => {
       </div>
       <div v-else class="overflow-x-auto">
         <table class="w-full min-w-[1040px] text-left text-sm">
-          <thead class="bg-slate-50 text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">
+          <thead class="sticky top-0 z-10 bg-slate-50 text-xs font-black uppercase tracking-[0.16em] text-slate-500">
             <tr>
               <th class="px-5 py-4">Bệnh viện</th>
               <th class="px-5 py-4">Địa chỉ</th>
@@ -353,14 +398,14 @@ onMounted(async () => {
       </div>
     </section>
 
-    <div v-if="showModal" class="fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm">
+    <div v-if="showModal" role="dialog" aria-modal="true" class="fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm">
       <form class="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-lg bg-white p-5 shadow-2xl" @submit.prevent="submitHospital">
         <div class="flex items-center justify-between border-b border-slate-200 pb-4">
           <h3 class="flex items-center gap-2 text-lg font-black text-slate-950">
             <Building2 class="h-5 w-5 text-[#E31837]" />
             {{ modalTitle }}
           </h3>
-          <button type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-100" @click="showModal = false">
+          <button type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-100" @click="closeHospitalModal">
             <X class="h-4 w-4" />
           </button>
         </div>
@@ -433,7 +478,7 @@ onMounted(async () => {
         </div>
 
         <div class="mt-5 flex justify-end gap-3">
-          <button type="button" class="rounded-md border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700" @click="showModal = false">Hủy</button>
+          <button type="button" class="rounded-md border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700" @click="closeHospitalModal">Hủy</button>
           <button type="submit" class="inline-flex items-center gap-2 rounded-md bg-[#E31837] px-4 py-2 text-sm font-black text-white">
             <Loader2 v-if="isSaving" class="h-4 w-4 animate-spin" />
             {{ editingHospital ? 'Lưu thay đổi' : 'Thêm bệnh viện' }}

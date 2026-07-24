@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Activity, AlertTriangle, CalendarCheck2, CalendarRange, CheckCircle2, Droplet, Route, Send, Users } from '@lucide/vue'
+import { Activity, AlertTriangle, CalendarCheck2, CalendarRange, CheckCircle2, CheckSquare2, ChevronRight, Droplet, Route, Send, Users } from '@lucide/vue'
 import type { DashboardStats, EmergencyAlert, EmergencyCommitment } from '../types'
 import InventoryForecastSummary from '../components/InventoryForecastSummary.vue'
+import AdminEmptyState from '../components/AdminEmptyState.vue'
 
 const props = defineProps<{
   stats: DashboardStats
@@ -17,6 +18,7 @@ const emit = defineEmits<{
   openSos: []
   openSosView: []
   openInventory: []
+  openEvents: []
 }>()
 
 const enRouteCommitments = computed(() =>
@@ -64,7 +66,7 @@ function formatVolume(value: number | undefined) {
           <div class="grid h-11 w-11 place-items-center rounded-md bg-red-50 text-[#E31837]">
             <AlertTriangle class="h-5 w-5" />
           </div>
-          <span class="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-black uppercase text-[#E31837]">
+          <span class="rounded-full bg-red-50 px-2.5 py-1 text-xs font-black uppercase text-[#E31837]">
             {{ isLoading ? 'Đang đồng bộ' : 'Trực tuyến' }}
           </span>
         </div>
@@ -75,7 +77,7 @@ function formatVolume(value: number | undefined) {
         </div>
       </button>
 
-      <article class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <button type="button" class="rounded-lg border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md" @click="emit('openEvents')">
         <div class="grid h-11 w-11 place-items-center rounded-md bg-blue-50 text-blue-600">
           <CalendarRange class="h-5 w-5" />
         </div>
@@ -84,9 +86,9 @@ function formatVolume(value: number | undefined) {
           <strong class="text-3xl font-black text-slate-950">{{ formatNumber(stats.upcoming_events) }}</strong>
           <span class="pb-1 text-xs font-bold text-blue-600">sự kiện</span>
         </div>
-      </article>
+      </button>
 
-      <article class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <button type="button" class="rounded-lg border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md" @click="emit('openEvents')">
         <div class="grid h-11 w-11 place-items-center rounded-md bg-emerald-50 text-emerald-600">
           <CalendarCheck2 class="h-5 w-5" />
         </div>
@@ -95,7 +97,7 @@ function formatVolume(value: number | undefined) {
           <strong class="text-3xl font-black text-slate-950">{{ formatNumber(stats.scheduled_appointments) }}</strong>
           <span class="pb-1 text-xs font-bold text-emerald-600">đang chờ</span>
         </div>
-      </article>
+      </button>
 
       <article class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <div class="grid h-11 w-11 place-items-center rounded-md bg-slate-100 text-slate-700">
@@ -119,6 +121,33 @@ function formatVolume(value: number | undefined) {
       </article>
     </section>
 
+    <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h3 class="flex items-center gap-2 text-base font-black text-slate-950"><CheckSquare2 class="h-5 w-5 text-[#E31837]" /> Việc cần ưu tiên hôm nay</h3>
+          <p class="mt-1 text-sm font-semibold text-slate-500">Đi thẳng tới luồng cần xử lý, không phải tìm lại trong menu.</p>
+        </div>
+        <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{{ activeAlerts.length + (enRouteCommitments.length ? 1 : 0) + (stats.scheduled_appointments ? 1 : 0) }} việc</span>
+      </div>
+      <div class="mt-4 grid gap-3 lg:grid-cols-3">
+        <button class="flex items-center gap-3 rounded-lg border p-3 text-left transition hover:shadow-sm" :class="activeAlerts.length ? 'border-red-200 bg-red-50' : 'border-slate-100 bg-slate-50'" @click="emit('openSosView')">
+          <span class="grid h-9 w-9 place-items-center rounded-lg bg-white text-[#E31837]"><AlertTriangle class="h-4 w-4" /></span>
+          <span class="min-w-0 flex-1"><span class="block text-sm font-black text-slate-900">Điều phối {{ activeAlerts.length }} ca SOS</span><span class="block text-xs font-semibold text-slate-500">{{ enRouteCommitments.length }} người đang di chuyển</span></span>
+          <ChevronRight class="h-4 w-4 text-slate-400" />
+        </button>
+        <button class="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3 text-left transition hover:border-blue-200 hover:shadow-sm" @click="emit('openEvents')">
+          <span class="grid h-9 w-9 place-items-center rounded-lg bg-white text-blue-600"><CalendarCheck2 class="h-4 w-4" /></span>
+          <span class="min-w-0 flex-1"><span class="block text-sm font-black text-slate-900">Xử lý lượt đặt lịch</span><span class="block text-xs font-semibold text-slate-500">{{ formatNumber(stats.scheduled_appointments) }} lượt đang chờ</span></span>
+          <ChevronRight class="h-4 w-4 text-slate-400" />
+        </button>
+        <button class="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3 text-left transition hover:border-purple-200 hover:shadow-sm" @click="emit('openInventory')">
+          <span class="grid h-9 w-9 place-items-center rounded-lg bg-white text-purple-600"><Droplet class="h-4 w-4" /></span>
+          <span class="min-w-0 flex-1"><span class="block text-sm font-black text-slate-900">Kiểm tra kho & dự báo</span><span class="block text-xs font-semibold text-slate-500">Đánh giá cảnh báo thiếu hụt</span></span>
+          <ChevronRight class="h-4 w-4 text-slate-400" />
+        </button>
+      </div>
+    </section>
+
     <InventoryForecastSummary
       :api-base-url="apiBaseUrl"
       :hospital-id="selectedHospitalId"
@@ -136,7 +165,7 @@ function formatVolume(value: number | undefined) {
             <p class="mt-1 text-sm text-slate-500">Các ca báo động đỏ đang được điều phối qua Reverb và Firebase.</p>
           </div>
           <div class="rounded-md bg-slate-50 px-3 py-2 text-right">
-            <p class="text-[11px] font-bold uppercase text-slate-400">Đã thông báo</p>
+            <p class="text-xs font-bold uppercase text-slate-400">Đã thông báo</p>
             <p class="text-lg font-black text-slate-950">{{ formatNumber(stats.notified_donors) }} người</p>
           </div>
         </div>
@@ -175,9 +204,7 @@ function formatVolume(value: number | undefined) {
             </div>
             <p class="mt-3 text-sm text-slate-700">{{ alert.message }}</p>
           </article>
-          <p v-if="latestAlerts.length === 0" class="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
-            Chưa có ca SOS đang hoạt động trong phạm vi hiện tại.
-          </p>
+          <AdminEmptyState v-if="latestAlerts.length === 0" compact title="Không có ca SOS đang hoạt động" description="Hệ thống an toàn và sẵn sàng tiếp nhận yêu cầu điều phối mới." />
         </div>
       </article>
 
@@ -195,7 +222,7 @@ function formatVolume(value: number | undefined) {
             >
               <div class="flex items-center justify-between">
                 <p class="font-black text-slate-900">{{ commitment.donor?.name ?? 'Tình nguyện viên' }}</p>
-                <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-700">
+                <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-black uppercase text-emerald-700">
                   {{ commitment.status === 'en_route' ? 'Đang di chuyển' : 'Đã cam kết' }}
                 </span>
               </div>
@@ -203,9 +230,7 @@ function formatVolume(value: number | undefined) {
                 {{ commitment.donor?.blood_type ?? '--' }} · Dự kiến {{ commitment.eta_minutes ?? '--' }} phút
               </p>
             </div>
-            <p v-if="enRouteCommitments.length === 0" class="rounded-md border border-dashed border-slate-200 p-4 text-center text-sm text-slate-500">
-              Chưa có cam kết mới trong phiên trực hiện tại.
-            </p>
+            <AdminEmptyState v-if="enRouteCommitments.length === 0" compact title="Chưa có người hiến đang di chuyển" description="Cam kết mới sẽ xuất hiện tại đây theo thời gian thực." />
           </div>
         </article>
 
