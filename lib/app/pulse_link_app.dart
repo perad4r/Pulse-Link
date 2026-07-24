@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -12,6 +13,7 @@ import '../features/emergency/presentation/live_blood_journey_screen.dart';
 import '../features/emergency/presentation/sos_mode_screen.dart';
 import '../features/gratitude/domain/gratitude_letter.dart';
 import '../features/gratitude/presentation/gratitude_letter_screen.dart';
+import '../features/onboarding/presentation/launch_intro_screen.dart';
 import '../features/profile/presentation/hero_level_up_screen.dart';
 import '../infrastructure/notifications/mobile_push_notification_service.dart';
 import 'pulse_link_controller.dart';
@@ -21,9 +23,11 @@ class PulseLinkApp extends StatefulWidget {
   const PulseLinkApp({
     super.key,
     required this.controller,
+    this.showLaunchIntro = true,
   });
 
   final PulseLinkController controller;
+  final bool showLaunchIntro;
 
   @override
   State<PulseLinkApp> createState() => _PulseLinkAppState();
@@ -38,11 +42,16 @@ class _PulseLinkAppState extends State<PulseLinkApp>
   final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   bool _notificationPromptCheckRunning = false;
   bool _notificationPromptHandled = false;
+  late bool _launchIntroVisible;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _launchIntroVisible = widget.showLaunchIntro &&
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS);
     widget.controller.initialize();
   }
 
@@ -66,7 +75,9 @@ class _PulseLinkAppState extends State<PulseLinkApp>
       animation: widget.controller,
       builder: (context, _) {
         final state = widget.controller.state;
-        _considerNotificationPermissionPrompt(state);
+        if (!_launchIntroVisible) {
+          _considerNotificationPermissionPrompt(state);
+        }
 
         return MaterialApp(
           navigatorKey: _navigatorKey,
@@ -86,11 +97,21 @@ class _PulseLinkAppState extends State<PulseLinkApp>
             duration: const Duration(milliseconds: 450),
             switchInCurve: Curves.easeOutCubic,
             switchOutCurve: Curves.easeInCubic,
-            child: _homeForState(state),
+            child: _launchIntroVisible
+                ? LaunchIntroScreen(
+                    key: const ValueKey('launch-intro'),
+                    onFinished: _finishLaunchIntro,
+                  )
+                : _homeForState(state),
           ),
         );
       },
     );
+  }
+
+  void _finishLaunchIntro() {
+    if (!mounted || !_launchIntroVisible) return;
+    setState(() => _launchIntroVisible = false);
   }
 
   void _considerNotificationPermissionPrompt(PulseLinkState state) {

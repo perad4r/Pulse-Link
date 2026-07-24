@@ -29,7 +29,9 @@ void main() {
       communityImpactService: MockCommunityImpactService(),
     );
 
-    await tester.pumpWidget(PulseLinkApp(controller: controller));
+    await tester.pumpWidget(
+      PulseLinkApp(controller: controller, showLaunchIntro: false),
+    );
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 200));
       if (find.byType(CircularProgressIndicator).evaluate().isEmpty) {
@@ -77,7 +79,9 @@ void main() {
       pushNotificationService: pushService,
     );
 
-    await tester.pumpWidget(PulseLinkApp(controller: controller));
+    await tester.pumpWidget(
+      PulseLinkApp(controller: controller, showLaunchIntro: false),
+    );
     for (var i = 0; i < 30; i++) {
       await tester.pump(const Duration(milliseconds: 200));
       if (find.text('Không bỏ lỡ lời kêu gọi SOS').evaluate().isNotEmpty) {
