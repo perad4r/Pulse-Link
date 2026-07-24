@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { apiFetch } from '../services/api'
 import { ArrowRight, BarChart3, Loader2, ShieldCheck } from '@lucide/vue'
 
 type RiskRow = {
@@ -54,7 +55,7 @@ async function load() {
   error.value = null
   try {
     const hospitalQuery = props.hospitalId ? `?hospital_id=${props.hospitalId}&horizon=7` : '?horizon=7'
-    const response = await fetch(`${props.apiBaseUrl}/api/admin/blood-forecasts/overview${hospitalQuery}`)
+    const response = await apiFetch(`${props.apiBaseUrl}/api/admin/blood-forecasts/overview${hospitalQuery}`)
     if (!response.ok) throw new Error('Không thể tải dự báo kho máu.')
     const payload = await response.json() as { data: ForecastOverview | null }
     overview.value = payload.data
@@ -101,17 +102,17 @@ onMounted(load)
     <div v-else class="mt-4 space-y-4">
       <div class="grid gap-3 sm:grid-cols-3">
         <div class="rounded-md bg-red-50 p-3">
-          <p class="text-[11px] font-black uppercase tracking-[0.12em] text-red-600">Cần theo dõi</p>
+          <p class="text-xs font-black uppercase tracking-[0.12em] text-red-600">Cần theo dõi</p>
           <p class="mt-1 text-2xl font-black text-slate-950">{{ activeRisks.length }}</p>
           <p class="text-xs font-semibold text-slate-500">nhóm máu</p>
         </div>
         <div class="rounded-md bg-slate-50 p-3">
-          <p class="text-[11px] font-black uppercase tracking-[0.12em] text-slate-400">Chất lượng dữ liệu</p>
+          <p class="text-xs font-black uppercase tracking-[0.12em] text-slate-400">Chất lượng dữ liệu</p>
           <p class="mt-1 text-lg font-black capitalize text-slate-950">{{ dataQuality }}</p>
           <p class="text-xs font-semibold text-slate-500">{{ overview.run.data_quality?.is_demo ? 'Có dữ liệu mô phỏng' : 'Dữ liệu vận hành' }}</p>
         </div>
         <div class="rounded-md bg-emerald-50 p-3">
-          <p class="text-[11px] font-black uppercase tracking-[0.12em] text-emerald-700">Forecast run</p>
+          <p class="text-xs font-black uppercase tracking-[0.12em] text-emerald-700">Forecast run</p>
           <p class="mt-1 text-lg font-black text-slate-950">#{{ overview.run.id }}</p>
           <p class="text-xs font-semibold text-slate-500">đã hoàn tất</p>
         </div>
@@ -126,7 +127,7 @@ onMounted(load)
               <p class="text-xs font-semibold text-slate-500">{{ risk.shortage_date ? `Dự kiến dưới ngưỡng: ${risk.shortage_date}` : 'Cần kiểm tra ngưỡng an toàn' }}</p>
             </div>
           </div>
-          <span :class="['rounded-full px-2.5 py-1 text-[10px] font-black uppercase', severityClass(risk.severity)]">{{ severityLabel(risk.severity) }}</span>
+          <span :class="['rounded-full px-2.5 py-1 text-xs font-black uppercase', severityClass(risk.severity)]">{{ severityLabel(risk.severity) }}</span>
         </article>
       </div>
       <div v-else class="flex items-center gap-2 rounded-md bg-emerald-50 p-3 text-sm font-bold text-emerald-700">

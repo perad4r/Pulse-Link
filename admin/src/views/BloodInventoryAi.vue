@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Activity,
   AlertTriangle,
@@ -20,8 +21,27 @@ import {
   Calendar
 } from '@lucide/vue'
 import type { BloodStock, BloodSafetyThreshold, BloodDemandForecast, SmartAlert } from '../types'
+import { apiFetch } from '../services/api'
 
 type InventoryTab = 'inventory' | 'forecast' | 'alerts' | 'reports'
+
+const route = useRoute()
+const router = useRouter()
+
+function queryText(key: string, fallback = '') {
+  const value = route.query[key]
+  return typeof value === 'string' ? value : fallback
+}
+
+function queryPage() {
+  const value = Number(route.query.page)
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 1
+}
+
+function queryInventoryTab(): InventoryTab {
+  const value = queryText('tab', 'inventory')
+  return ['inventory', 'forecast', 'alerts', 'reports'].includes(value) ? value as InventoryTab : 'inventory'
+}
 
 const props = defineProps<{
   apiBaseUrl?: string
@@ -33,7 +53,7 @@ const emit = defineEmits<{
 }>()
 
 const apiBase = props.apiBaseUrl ?? ''
-const currentTab = ref<InventoryTab>('inventory')
+const currentTab = ref<InventoryTab>(queryInventoryTab())
 const tabNavigationRef = ref<HTMLElement | null>(null)
 
 // State variables
@@ -54,11 +74,12 @@ const forecastLoading = ref(false)
 const alertLoading = ref(false)
 
 // Search & Filter
-const searchQuery = ref('')
-const selectedBloodType = ref('')
-const selectedStatus = ref('')
-const currentPage = ref(1)
+const searchQuery = ref(queryText('q'))
+const selectedBloodType = ref(queryText('blood_type'))
+const selectedStatus = ref(queryText('status'))
+const currentPage = ref(queryPage())
 const totalPages = ref(1)
+let syncingRouteQuery = false
 
 // Simulation Parameters
 const dengueOutbreak = ref(false)
@@ -205,13 +226,66 @@ watch(() => props.selectedHospitalId, () => {
 })
 
 watch([searchQuery, selectedBloodType, selectedStatus], () => {
+  if (syncingRouteQuery) return
   currentPage.value = 1
+  void syncInventoryRoute()
   fetchInventory()
 })
 
+watch(currentPage, () => {
+  if (syncingRouteQuery) return
+  void syncInventoryRoute()
+  fetchInventory()
+})
+
+watch(currentTab, () => {
+  if (!syncingRouteQuery) void syncInventoryRoute()
+})
+
+watch(() => route.query, () => {
+  const nextTab = queryInventoryTab()
+  const nextSearch = queryText('q')
+  const nextBloodType = queryText('blood_type')
+  const nextStatus = queryText('status')
+  const nextPage = queryPage()
+  if (
+    nextTab === currentTab.value
+    && nextSearch === searchQuery.value
+    && nextBloodType === selectedBloodType.value
+    && nextStatus === selectedStatus.value
+    && nextPage === currentPage.value
+  ) return
+
+  syncingRouteQuery = true
+  currentTab.value = nextTab
+  searchQuery.value = nextSearch
+  selectedBloodType.value = nextBloodType
+  selectedStatus.value = nextStatus
+  currentPage.value = nextPage
+  void nextTick(() => {
+    syncingRouteQuery = false
+    void fetchInventory()
+  })
+}, { deep: true })
+
+async function syncInventoryRoute() {
+  const query = { ...route.query }
+  if (currentTab.value === 'inventory') delete query.tab
+  else query.tab = currentTab.value
+  if (searchQuery.value.trim()) query.q = searchQuery.value.trim()
+  else delete query.q
+  if (selectedBloodType.value) query.blood_type = selectedBloodType.value
+  else delete query.blood_type
+  if (selectedStatus.value) query.status = selectedStatus.value
+  else delete query.status
+  if (currentPage.value > 1) query.page = String(currentPage.value)
+  else delete query.page
+  await router.replace({ query })
+}
+
 async function loadProvinces() {
   try {
-    const res = await fetch(`${apiBase}/api/locations/provinces`)
+    const res = await apiFetch(`${apiBase}/api/locations/provinces`)
     if (!res.ok) throw new Error()
     const json = await res.json()
     provinces.value = json.data
@@ -226,7 +300,7 @@ async function loadWards(provinceCode: string) {
     return
   }
   try {
-    const res = await fetch(`${apiBase}/api/locations/provinces/${provinceCode}/wards`)
+    const res = await apiFetch(`${apiBase}/api/locations/provinces/${provinceCode}/wards`)
     if (!res.ok) throw new Error()
     const json = await res.json()
     wards.value = json.data
@@ -237,7 +311,7 @@ async function loadWards(provinceCode: string) {
 
 async function loadHospitals() {
   try {
-    const res = await fetch(`${apiBase}/api/admin/hospitals`)
+    const res = await apiFetch(`${apiBase}/api/admin/hospitals`)
     if (!res.ok) throw new Error()
     const json = await res.json()
     hospitals.value = json.data
@@ -279,7 +353,7 @@ async function uploadAiEventImage(event: Event) {
     const fd = new FormData()
     fd.append('file', file)
 
-    const res = await fetch(`${apiBase}/api/admin/uploads`, {
+    const res = await apiFetch(`${apiBase}/api/admin/uploads`, {
       method: 'POST',
       headers: { Accept: 'application/json' },
       body: fd,
@@ -318,7 +392,7 @@ async function submitAiEvent() {
       is_published: aiEventForm.value.isPublished,
     }
 
-    const res = await fetch(`${apiBase}/api/admin/donation-events`, {
+    const res = await apiFetch(`${apiBase}/api/admin/donation-events`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -386,7 +460,7 @@ async function fetchInventory() {
   const bt = selectedBloodType.value ? `&blood_type=${encodeURIComponent(selectedBloodType.value)}` : ''
   const st = selectedStatus.value ? `&status=${encodeURIComponent(selectedStatus.value)}` : ''
   
-  const res = await fetch(`${apiBase}/api/admin/blood-stocks?page=${currentPage.value}${hospitalParam}${q}${bt}${st}`)
+  const res = await apiFetch(`${apiBase}/api/admin/blood-stocks?page=${currentPage.value}${hospitalParam}${q}${bt}${st}`)
   if (!res.ok) throw new Error()
   const json = await res.json()
   
@@ -399,7 +473,7 @@ async function fetchInventory() {
 
 async function fetchThresholds() {
   const hospitalParam = props.selectedHospitalId ? `?hospital_id=${props.selectedHospitalId}` : ''
-  const res = await fetch(`${apiBase}/api/admin/blood-stocks/thresholds${hospitalParam}`)
+  const res = await apiFetch(`${apiBase}/api/admin/blood-stocks/thresholds${hospitalParam}`)
   if (!res.ok) throw new Error()
   const json = await res.json()
   thresholds.value = json.data
@@ -410,7 +484,7 @@ async function fetchForecast(forceRefresh = false) {
   try {
     if (!forceRefresh) {
       const hospitalParam = props.selectedHospitalId ? `?hospital_id=${props.selectedHospitalId}&horizon=30` : '?horizon=30'
-      const res = await fetch(`${apiBase}/api/admin/blood-forecasts/overview${hospitalParam}`)
+      const res = await apiFetch(`${apiBase}/api/admin/blood-forecasts/overview${hospitalParam}`)
       if (!res.ok) throw new Error()
       const json = await res.json()
       if (!json.data) {
@@ -429,7 +503,7 @@ async function fetchForecast(forceRefresh = false) {
     const demandMultiplier = 1 + (dengueOutbreak.value ? 0.25 : 0) + (holidaySeason.value ? 0.15 : 0)
     const hasSimulation = demandMultiplier !== 1 || weatherExtreme.value
     const endpoint = hasSimulation ? 'simulations' : 'runs'
-    const res = await fetch(`${apiBase}/api/admin/blood-forecasts/${endpoint}`, {
+    const res = await apiFetch(`${apiBase}/api/admin/blood-forecasts/${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
@@ -482,7 +556,7 @@ function applyForecastRun(run: any, points: any[], recommendations: any[]) {
 async function waitForForecastRun(runId: number) {
   for (let attempt = 0; attempt < 8; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 750))
-    const res = await fetch(`${apiBase}/api/admin/blood-forecasts/runs/${runId}`)
+    const res = await apiFetch(`${apiBase}/api/admin/blood-forecasts/runs/${runId}`)
     if (!res.ok) return null
     const json = await res.json()
     if (json.data.run.status === 'completed' || json.data.run.status === 'failed') {
@@ -498,7 +572,7 @@ async function createForecastCampaignDraft() {
 
   const primaryRecommendationId = plan.eventRecommendationIds[0]
   try {
-    const res = await fetch(`${apiBase}/api/admin/forecast-recommendations/${primaryRecommendationId}/draft-event`, {
+    const res = await apiFetch(`${apiBase}/api/admin/forecast-recommendations/${primaryRecommendationId}/draft-event`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ recommendation_ids: plan.eventRecommendationIds }),
@@ -517,7 +591,7 @@ async function createForecastCampaignDraft() {
 
 async function fetchAlerts() {
   const hospitalParam = props.selectedHospitalId ? `?hospital_id=${props.selectedHospitalId}` : ''
-  const res = await fetch(`${apiBase}/api/admin/blood-stocks/alerts${hospitalParam}`)
+  const res = await apiFetch(`${apiBase}/api/admin/blood-stocks/alerts${hospitalParam}`)
   if (!res.ok) throw new Error()
   const json = await res.json()
   smartAlerts.value = json.data
@@ -525,7 +599,7 @@ async function fetchAlerts() {
 
 async function fetchReports() {
   const hospitalParam = props.selectedHospitalId ? `?hospital_id=${props.selectedHospitalId}` : ''
-  const res = await fetch(`${apiBase}/api/admin/blood-stocks/reports${hospitalParam}`)
+  const res = await apiFetch(`${apiBase}/api/admin/blood-stocks/reports${hospitalParam}`)
   if (!res.ok) throw new Error()
   const json = await res.json()
   reportsData.value = json.data
@@ -539,7 +613,7 @@ async function handleAddBag() {
       ...newBag.value,
       hospital_id: props.selectedHospitalId
     }
-    const res = await fetch(`${apiBase}/api/admin/blood-stocks`, {
+    const res = await apiFetch(`${apiBase}/api/admin/blood-stocks`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -574,7 +648,7 @@ async function handleAddBag() {
 // Update Bag Status (e.g. Mark as Used)
 async function handleUpdateStatus(bagId: number, status: 'processing' | 'used' | 'expired' | 'available' | 'allocated' | 'discarded') {
   try {
-    const res = await fetch(`${apiBase}/api/admin/blood-stocks/${bagId}/status`, {
+    const res = await apiFetch(`${apiBase}/api/admin/blood-stocks/${bagId}/status`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -610,7 +684,7 @@ async function handleSaveThresholds() {
       min_units: t.min_units
     }))
     
-    const res = await fetch(`${apiBase}/api/admin/blood-stocks/thresholds`, {
+    const res = await apiFetch(`${apiBase}/api/admin/blood-stocks/thresholds`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -636,7 +710,7 @@ async function handleSaveThresholds() {
 async function openMobilization(alert: SmartAlert) {
   alertLoading.value = true
   try {
-    const res = await fetch(`${apiBase}/api/admin/blood-stocks/alerts/${alert.id}/mobilize`, {
+    const res = await apiFetch(`${apiBase}/api/admin/blood-stocks/alerts/${alert.id}/mobilize`, {
       method: 'POST',
       headers: {
         'Accept': 'application/json'
@@ -663,7 +737,7 @@ async function submitMobilization() {
   isSaving.value = true
   try {
     // Đăng bài viết cộng đồng lên CMS để mobile app nhận tin
-    const res = await fetch(`${apiBase}/api/admin/community-posts`, {
+    const res = await apiFetch(`${apiBase}/api/admin/community-posts`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1025,14 +1099,14 @@ onMounted(async () => {
                 </span>
                 <span
                   v-if="item.is_scarce"
-                  class="rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-black uppercase text-red-600 animate-pulse"
+                  class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-black uppercase text-red-600 animate-pulse"
                 >
                   Khan hiếm
                 </span>
-                <span v-else-if="item.expiring_soon > 0" class="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-700">
+                <span v-else-if="item.expiring_soon > 0" class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-black uppercase text-amber-700">
                   {{ item.expiring_soon }} sắp hết hạn
                 </span>
-                <span v-else class="rounded-full bg-green-100 px-2 py-0.5 text-[9px] font-black uppercase text-green-700">
+                <span v-else class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-black uppercase text-green-700">
                   An toàn
                 </span>
               </div>
@@ -1054,7 +1128,7 @@ onMounted(async () => {
                     :style="{ left: `${(item.min_units / Math.max(item.min_units * 2, 10)) * 100}%` }"
                   />
                 </div>
-                <p class="text-[9px] font-semibold text-slate-400">Thể tích: {{ formatVolume(item.volume_ml) }}</p>
+                <p class="text-xs font-semibold text-slate-400">Thể tích: {{ formatVolume(item.volume_ml) }}</p>
               </div>
             </div>
           </div>
@@ -1066,16 +1140,16 @@ onMounted(async () => {
               <h3 class="text-sm font-black text-slate-950">Nhật ký biến động kho gần đây</h3>
               <p class="mt-1 text-xs text-slate-500">Mỗi thay đổi đều có nguồn và thời điểm để đối soát nhanh.</p>
             </div>
-            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-500">{{ recentMovements.length }} giao dịch</span>
+            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-500">{{ recentMovements.length }} giao dịch</span>
           </div>
           <div class="mt-3 divide-y divide-slate-100">
             <article v-for="movement in recentMovements" :key="movement.id" class="flex items-center justify-between gap-3 py-2.5 text-xs">
               <div class="min-w-0">
                 <p class="truncate font-bold text-slate-800">{{ movementLabel(movement) }} · {{ movement.blood_type }}</p>
-                <p class="mt-0.5 text-[10px] font-semibold text-slate-400">{{ formatAlertDateTime(movement.occurred_at) || '--' }} · {{ movement.source || 'inventory' }}</p>
+                <p class="mt-0.5 text-xs font-semibold text-slate-400">{{ formatAlertDateTime(movement.occurred_at) || '--' }} · {{ movement.source || 'inventory' }}</p>
               </div>
               <span
-                class="shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px] font-black"
+                class="shrink-0 rounded-full px-2 py-0.5 font-mono text-xs font-black"
                 :class="Number(movement.available_delta) > 0 ? 'bg-emerald-50 text-emerald-700' : Number(movement.available_delta) < 0 ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-500'"
               >
                 {{ Number(movement.available_delta) > 0 ? '+' : '' }}{{ movement.available_delta }} đơn vị
@@ -1131,8 +1205,8 @@ onMounted(async () => {
           <!-- Table Content -->
           <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
-              <thead>
-                <tr class="border-b border-slate-100 bg-slate-50/70 text-[10px] font-black uppercase tracking-wider text-slate-400">
+              <thead class="sticky top-0 z-10 bg-slate-50">
+                <tr class="border-b border-slate-100 bg-slate-50/70 text-xs font-black uppercase tracking-wider text-slate-400">
                   <th class="p-4">Mã số túi máu</th>
                   <th class="p-4">Nhóm máu</th>
                   <th class="p-4">Thể tích</th>
@@ -1158,14 +1232,14 @@ onMounted(async () => {
                       <span class="whitespace-nowrap" :class="getExpiryColorClass(bag.expiry_date, bag.status)">
                         {{ formatInventoryDate(bag.expiry_date) }}
                       </span>
-                      <span class="text-[10px] text-slate-400 font-normal">
+                      <span class="text-xs text-slate-400 font-normal">
                         ({{ getExpiryLabel(bag.expiry_date, bag.status) }})
                       </span>
                     </div>
                   </td>
                   <td class="p-4">
                     <span
-                      class="inline-block rounded-full px-2 py-0.5 text-[10px] font-bold"
+                      class="inline-block rounded-full px-2 py-0.5 text-xs font-bold"
                       :class="{
                         'bg-violet-100 text-violet-800': bag.status === 'processing',
                         'bg-emerald-100 text-emerald-800': bag.status === 'available',
@@ -1188,13 +1262,13 @@ onMounted(async () => {
                     <div class="flex justify-end gap-1.5" v-if="bag.status === 'available'">
                       <button
                         @click="handleUpdateStatus(bag.id, 'used')"
-                        class="rounded border border-blue-100 bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-600 hover:bg-blue-100 active:scale-95 transition"
+                        class="rounded border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-600 hover:bg-blue-100 active:scale-95 transition"
                       >
                         Xuất kho dùng
                       </button>
                       <button
                         @click="handleUpdateStatus(bag.id, 'expired')"
-                        class="rounded border border-red-100 bg-red-50 px-2.5 py-1 text-[10px] font-bold text-red-600 hover:bg-red-100 active:scale-95 transition"
+                        class="rounded border border-red-100 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-600 hover:bg-red-100 active:scale-95 transition"
                       >
                         Báo hủy/Hết hạn
                       </button>
@@ -1202,13 +1276,13 @@ onMounted(async () => {
                     <div class="flex justify-end gap-1.5" v-else-if="bag.status === 'processing'">
                       <button
                         @click="handleUpdateStatus(bag.id, 'available')"
-                        class="rounded border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100 active:scale-95 transition"
+                        class="rounded border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100 active:scale-95 transition"
                       >
                         Lưu vào kho
                       </button>
                       <button
                         @click="handleUpdateStatus(bag.id, 'discarded')"
-                        class="rounded border border-red-100 bg-red-50 px-2.5 py-1 text-[10px] font-bold text-red-600 hover:bg-red-100 active:scale-95 transition"
+                        class="rounded border border-red-100 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-600 hover:bg-red-100 active:scale-95 transition"
                       >
                         Loại bỏ
                       </button>
@@ -1216,18 +1290,18 @@ onMounted(async () => {
                     <div class="flex justify-end gap-1.5" v-else-if="bag.status === 'allocated'">
                       <button
                         @click="handleUpdateStatus(bag.id, 'used')"
-                        class="rounded border border-blue-100 bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-600 hover:bg-blue-100 active:scale-95 transition"
+                        class="rounded border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-600 hover:bg-blue-100 active:scale-95 transition"
                       >
                         Xác nhận đã dùng
                       </button>
                       <button
                         @click="handleUpdateStatus(bag.id, 'available')"
-                        class="rounded border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100 active:scale-95 transition"
+                        class="rounded border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100 active:scale-95 transition"
                       >
                         Trả kho
                       </button>
                     </div>
-                    <span v-else class="text-slate-400 italic text-[11px] font-normal">Đã xử lý (Không thể sửa)</span>
+                    <span v-else class="text-slate-400 italic text-xs font-normal">Đã xử lý (Không thể sửa)</span>
                   </td>
                 </tr>
                 <tr v-if="inventoryData.length === 0">
@@ -1243,7 +1317,7 @@ onMounted(async () => {
           <div class="flex items-center justify-between border-t border-slate-100 p-4" v-if="totalPages > 1">
             <button
               :disabled="currentPage === 1"
-              @click="currentPage--; fetchInventory()"
+              @click="currentPage--"
               class="rounded border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-50 disabled:opacity-50"
             >
               Trang trước
@@ -1251,7 +1325,7 @@ onMounted(async () => {
             <span class="text-xs font-bold text-slate-600">Trang {{ currentPage }} / {{ totalPages }}</span>
             <button
               :disabled="currentPage === totalPages"
-              @click="currentPage++; fetchInventory()"
+              @click="currentPage++"
               class="rounded border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-50 disabled:opacity-50"
             >
               Trang sau
@@ -1298,10 +1372,10 @@ onMounted(async () => {
                 <line x1="50" y1="250" x2="750" y2="250" stroke="#e2e8f0" stroke-width="2" />
 
                 <!-- Y-Axis Labels -->
-                <text x="40" y="24" text-anchor="end" class="text-[9px] font-mono fill-slate-400 font-bold">3,000ml</text>
-                <text x="40" y="94" text-anchor="end" class="text-[9px] font-mono fill-slate-400 font-bold">2,000ml</text>
-                <text x="40" y="164" text-anchor="end" class="text-[9px] font-mono fill-slate-400 font-bold">1,000ml</text>
-                <text x="40" y="234" text-anchor="end" class="text-[9px] font-mono fill-slate-400 font-bold">100ml</text>
+                <text x="40" y="24" text-anchor="end" class="text-xs font-mono fill-slate-400 font-bold">3,000ml</text>
+                <text x="40" y="94" text-anchor="end" class="text-xs font-mono fill-slate-400 font-bold">2,000ml</text>
+                <text x="40" y="164" text-anchor="end" class="text-xs font-mono fill-slate-400 font-bold">1,000ml</text>
+                <text x="40" y="234" text-anchor="end" class="text-xs font-mono fill-slate-400 font-bold">100ml</text>
 
                 <!-- Bars for forecast -->
                 <g v-for="(f, index) in forecasts" :key="index">
@@ -1330,7 +1404,7 @@ onMounted(async () => {
                     :x="50 + index * 87.5 + 43"
                     :y="242 - (f.predicted_volume_ml / maxForecastVal) * 220"
                     text-anchor="middle"
-                    class="text-[10px] font-mono font-bold fill-[#E31837]"
+                    class="text-xs font-mono font-bold fill-[#E31837]"
                   >
                     {{ f.predicted_volume_ml }}ml
                   </text>
@@ -1355,7 +1429,7 @@ onMounted(async () => {
               <p class="text-xs text-slate-700 bg-purple-50/50 rounded-lg p-4 border border-purple-100/30 leading-relaxed font-semibold">
                 {{ aiReasoning || 'AI đang phân tích các điều kiện vận hành hiện tại...' }}
               </p>
-              <div class="text-[10px] text-slate-400 font-bold">Run: {{ forecastRunStatus || '--' }} · Chất lượng dữ liệu: {{ forecastDataQuality || '--' }} · Ngày lập: {{ forecastDate || '--' }}</div>
+              <div class="text-xs text-slate-400 font-bold">Run: {{ forecastRunStatus || '--' }} · Chất lượng dữ liệu: {{ forecastDataQuality || '--' }} · Ngày lập: {{ forecastDate || '--' }}</div>
             </div>
           </div>
 
@@ -1371,7 +1445,7 @@ onMounted(async () => {
                 <div class="flex items-start justify-between">
                   <div class="max-w-[75%]">
                     <label class="text-xs font-black text-slate-900 block">Dịch sốt xuất huyết bùng phát</label>
-                    <span class="text-[10px] text-slate-400 font-semibold leading-tight block mt-0.5">Tăng đột biến nhu cầu chế phẩm tiểu cầu và máu O/A tại vùng bùng dịch.</span>
+                    <span class="text-xs text-slate-400 font-semibold leading-tight block mt-0.5">Tăng đột biến nhu cầu chế phẩm tiểu cầu và máu O/A tại vùng bùng dịch.</span>
                   </div>
                   <input
                     type="checkbox"
@@ -1383,7 +1457,7 @@ onMounted(async () => {
                 <div class="flex items-start justify-between">
                   <div class="max-w-[75%]">
                     <label class="text-xs font-black text-slate-900 block">Kỳ nghỉ lễ lớn (Tết/Quốc khánh)</label>
-                    <span class="text-[10px] text-slate-400 font-semibold leading-tight block mt-0.5">Lượng máu hiến giảm mạnh, đồng thời tăng rủi ro các ca cấp cứu giao thông.</span>
+                    <span class="text-xs text-slate-400 font-semibold leading-tight block mt-0.5">Lượng máu hiến giảm mạnh, đồng thời tăng rủi ro các ca cấp cứu giao thông.</span>
                   </div>
                   <input
                     type="checkbox"
@@ -1395,7 +1469,7 @@ onMounted(async () => {
                 <div class="flex items-start justify-between">
                   <div class="max-w-[75%]">
                     <label class="text-xs font-black text-slate-900 block">Thời tiết cực đoan (Lũ lụt/Nắng nóng)</label>
-                    <span class="text-[10px] text-slate-400 font-semibold leading-tight block mt-0.5">Giảm nghiêm trọng số lượng người hiến trực tiếp tại các điểm di động.</span>
+                    <span class="text-xs text-slate-400 font-semibold leading-tight block mt-0.5">Giảm nghiêm trọng số lượng người hiến trực tiếp tại các điểm di động.</span>
                   </div>
                   <input
                     type="checkbox"
@@ -1430,91 +1504,130 @@ onMounted(async () => {
               </ul>
             </div>
 
-            <div v-if="forecastCampaignPlan" class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-              <div class="border-b border-slate-100 px-5 py-4">
-                <div class="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 class="text-sm font-black text-slate-950">Kế hoạch đáp ứng nhu cầu máu</h3>
-                    <p class="mt-1 text-[11px] font-semibold leading-relaxed text-slate-500">
-                      Gom các tín hiệu thiếu hụt thành một chiến dịch, không tạo từng đợt riêng lẻ theo nhóm máu.
-                    </p>
-                  </div>
-                  <span
-                    class="shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black uppercase"
-                    :class="forecastCampaignPlan.hasDraft ? 'bg-emerald-50 text-emerald-700' : 'bg-purple-50 text-purple-700'"
-                  >
-                    {{ forecastCampaignPlan.hasDraft ? 'Đã tạo nháp' : 'Đề xuất AI' }}
-                  </span>
-                </div>
-              </div>
+          </div>
+        </div>
 
-              <div class="space-y-4 p-5">
-                <div class="rounded-lg border border-purple-100 bg-purple-50/60 p-3.5">
-                  <p class="text-xs font-black text-slate-950">01 chiến dịch hiến máu đa nhóm</p>
-                  <p class="mt-1 text-[11px] font-semibold leading-relaxed text-slate-600">
-                    Quy mô đề xuất {{ forecastCampaignPlan.capacity }} lượt đăng ký. Nhóm ưu tiên và mức thiếu dự báo được dùng để điều phối tiếp nhận trong cùng một đợt hiến.
+        <!-- AI campaign proposal: full-width below the forecast chart -->
+        <section
+          v-if="forecastCampaignPlan"
+          class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+        >
+          <div class="flex flex-col gap-3 border-b border-slate-100 px-5 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 class="flex items-center gap-2 text-base font-black text-slate-950">
+                <Calendar class="h-5 w-5 text-purple-600" />
+                Đề xuất đợt hiến máu từ AI
+              </h3>
+              <p class="mt-1 text-xs font-semibold leading-relaxed text-slate-500">
+                Dựa trên dự báo nhu cầu, AI gom các nhóm máu thiếu hụt vào một chiến dịch để điều phối hiệu quả hơn.
+              </p>
+            </div>
+            <span
+              class="w-fit shrink-0 rounded-full px-3 py-1.5 text-xs font-black"
+              :class="forecastCampaignPlan.hasDraft ? 'bg-emerald-50 text-emerald-700' : 'bg-purple-50 text-purple-700'"
+            >
+              {{ forecastCampaignPlan.hasDraft ? 'Đã tạo bản nháp' : '01 đề xuất mới' }}
+            </span>
+          </div>
+
+          <div class="p-4 sm:p-6">
+            <article class="overflow-hidden rounded-xl border border-purple-100 bg-gradient-to-br from-white via-white to-purple-50/50">
+              <div class="flex flex-col gap-4 border-b border-purple-100/70 p-5 lg:flex-row lg:items-start lg:justify-between">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h4 class="text-base font-black text-slate-950">Chiến dịch hiến máu đa nhóm theo nhu cầu dự báo</h4>
+                    <span class="rounded-full bg-purple-100 px-2.5 py-1 text-xs font-black text-purple-700">Đề xuất AI</span>
+                    <span class="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-700">Cần phê duyệt</span>
+                  </div>
+                  <p class="mt-2 max-w-4xl text-xs font-semibold leading-relaxed text-slate-600">
+                    Tổ chức một đợt hiến tập trung cho nhiều nhóm máu, ưu tiên tiếp nhận theo mức thiếu dự kiến thay vì tạo từng chiến dịch rời rạc.
                   </p>
                 </div>
-
-                <div class="max-h-52 space-y-2 overflow-y-auto pr-1">
-                  <div
-                    v-for="need in forecastCampaignPlan.bloodNeeds"
-                    :key="need.bloodType"
-                    class="flex items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5"
-                  >
-                    <div class="flex min-w-0 items-center gap-2.5">
-                      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-xs font-black text-[#E31837] shadow-sm">
-                        {{ need.bloodType }}
-                      </span>
-                      <div class="min-w-0">
-                        <p class="truncate text-[11px] font-black text-slate-800">
-                          {{ need.requiresCampaign ? `Thiếu dự kiến ${need.shortageUnits} đơn vị` : 'Theo dõi ngưỡng an toàn' }}
-                        </p>
-                        <p class="mt-0.5 text-[10px] font-semibold text-slate-400">
-                          {{ need.dueDate ? `Mốc rủi ro ${need.dueDate}` : 'Chưa xác định mốc thiếu hụt' }}
-                        </p>
-                      </div>
-                    </div>
-                    <span
-                      class="shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black ring-1 ring-inset"
-                      :class="forecastSeverityClass(need.severity)"
-                    >
-                      {{ forecastSeverityLabel(need.severity) }}
-                    </span>
+                <div class="grid shrink-0 grid-cols-2 gap-2 text-center sm:min-w-[280px]">
+                  <div class="rounded-lg border border-slate-100 bg-white px-3 py-2.5 shadow-sm">
+                    <p class="text-xs font-black uppercase tracking-wide text-slate-400">Quy mô</p>
+                    <p class="mt-1 text-sm font-black text-slate-900">{{ forecastCampaignPlan.capacity }} lượt</p>
                   </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-2 text-center">
-                  <div class="rounded-lg bg-slate-50 px-2 py-2.5">
-                    <p class="text-[9px] font-black uppercase tracking-wide text-slate-400">Nhóm cần theo dõi</p>
-                    <p class="mt-1 text-sm font-black text-slate-900">{{ forecastCampaignPlan.bloodNeeds.length }} nhóm</p>
-                  </div>
-                  <div class="rounded-lg bg-slate-50 px-2 py-2.5">
-                    <p class="text-[9px] font-black uppercase tracking-wide text-slate-400">Thiếu dự kiến</p>
+                  <div class="rounded-lg border border-slate-100 bg-white px-3 py-2.5 shadow-sm">
+                    <p class="text-xs font-black uppercase tracking-wide text-slate-400">Thiếu dự kiến</p>
                     <p class="mt-1 text-sm font-black text-[#E31837]">{{ forecastCampaignPlan.totalProjectedGap }} đơn vị</p>
                   </div>
                 </div>
+              </div>
 
+              <div class="grid gap-5 p-5 xl:grid-cols-[minmax(0,1fr)_280px]">
+                <div>
+                  <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p class="text-xs font-black uppercase tracking-wide text-slate-500">Các nhóm máu cần ưu tiên</p>
+                    <span class="text-xs font-bold text-slate-400">{{ forecastCampaignPlan.bloodNeeds.length }} nhóm đang được theo dõi</span>
+                  </div>
+                  <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                    <div
+                      v-for="need in forecastCampaignPlan.bloodNeeds"
+                      :key="need.bloodType"
+                      class="rounded-lg border border-slate-100 bg-white p-3.5 shadow-sm"
+                    >
+                      <div class="flex items-start justify-between gap-3">
+                        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-50 text-xs font-black text-[#E31837]">
+                          {{ need.bloodType }}
+                        </span>
+                        <span
+                          class="rounded-full px-2 py-0.5 text-xs font-black ring-1 ring-inset"
+                          :class="forecastSeverityClass(need.severity)"
+                        >
+                          {{ forecastSeverityLabel(need.severity) }}
+                        </span>
+                      </div>
+                      <p class="mt-3 text-xs font-black text-slate-800">
+                        {{ need.requiresCampaign ? `Cần bù ${need.shortageUnits} đơn vị` : 'Tiếp tục theo dõi tồn kho' }}
+                      </p>
+                      <p class="mt-1 text-xs font-semibold text-slate-400">
+                        {{ need.dueDate ? `Mốc rủi ro: ${formatInventoryDate(need.dueDate)}` : 'Chưa có mốc thiếu hụt cụ thể' }}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <aside class="rounded-xl border border-purple-100 bg-purple-50/70 p-4">
+                  <p class="text-xs font-black uppercase tracking-wide text-purple-700">Cách AI lập kế hoạch</p>
+                  <ul class="mt-3 space-y-3 text-xs font-semibold leading-relaxed text-slate-600">
+                    <li class="flex gap-2">
+                      <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                      Gom nhu cầu nhiều nhóm máu vào cùng một đợt hiến.
+                    </li>
+                    <li class="flex gap-2">
+                      <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                      Dùng mức thiếu dự báo để ưu tiên tiếp nhận người hiến.
+                    </li>
+                    <li class="flex gap-2">
+                      <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                      Chỉ tạo bản nháp; điều phối viên vẫn kiểm tra trước khi công bố.
+                    </li>
+                  </ul>
+                </aside>
+              </div>
+
+              <div class="border-t border-purple-100/70 bg-white p-4">
                 <button
                   v-if="forecastCampaignPlan.eventRecommendationIds.length"
                   @click="createForecastCampaignDraft"
                   :disabled="forecastCampaignPlan.hasDraft || !forecastCampaignPlan.canCreateEvent"
-                  class="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-purple-600 px-3 text-xs font-black text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                  class="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-purple-600 px-4 text-xs font-black text-white shadow-sm transition hover:bg-purple-700 active:scale-[0.995] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
                 >
                   <CheckCircle2 v-if="forecastCampaignPlan.hasDraft" class="h-4 w-4" />
                   <Plus v-else class="h-4 w-4" />
-                  {{ forecastCampaignPlan.hasDraft ? 'ĐÃ TẠO NHÁP CHIẾN DỊCH' : 'TẠO NHÁP CHIẾN DỊCH TỔNG HỢP' }}
+                  {{ forecastCampaignPlan.hasDraft ? 'ĐÃ TẠO BẢN NHÁP CHIẾN DỊCH' : 'TẠO NHÁP CHIẾN DỊCH NÀY' }}
                 </button>
-                <p v-else class="rounded-lg bg-amber-50 px-3 py-2 text-center text-[10px] font-bold text-amber-700">
+                <p v-else class="rounded-lg bg-amber-50 px-3 py-2.5 text-center text-xs font-bold text-amber-700">
                   Chưa cần mở chiến dịch; hệ thống tiếp tục theo dõi các nhóm máu này.
                 </p>
               </div>
-            </div>
+            </article>
           </div>
-        </div>
+        </section>
 
         <!-- AI Suggested Events Section -->
-        <div v-if="suggestedEvents.length > 0" class="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
+        <div v-if="!forecastCampaignPlan && suggestedEvents.length > 0" class="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
           <div class="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
               <h3 class="text-base font-black text-slate-950 flex items-center gap-2">
@@ -1538,12 +1651,12 @@ onMounted(async () => {
               <div class="absolute right-4 top-4 flex items-center gap-1.5">
                 <span
                   v-if="event.urgency === 'high'"
-                  class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-600"
+                  class="rounded-full bg-red-50 px-2 py-0.5 text-xs font-bold text-red-600"
                 >
                   Khẩn cấp
                 </span>
                 <span
-                  class="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                  class="rounded-full px-2 py-0.5 text-xs font-bold"
                   :class="event.drive_type === 'in_hospital' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'"
                 >
                   {{ event.drive_type === 'in_hospital' ? 'Tại bệnh viện' : 'Lưu động' }}
@@ -1556,19 +1669,19 @@ onMounted(async () => {
 
                 <div class="grid grid-cols-2 gap-2 text-xs border-t border-slate-100 pt-3">
                   <div>
-                    <span class="text-slate-400 font-bold block uppercase text-[9px]">Đơn vị tổ chức:</span>
+                    <span class="text-slate-400 font-bold block uppercase text-xs">Đơn vị tổ chức:</span>
                     <span class="text-slate-700 font-bold block truncate">{{ event.organizer }}</span>
                   </div>
                   <div>
-                    <span class="text-slate-400 font-bold block uppercase text-[9px]">Địa điểm:</span>
+                    <span class="text-slate-400 font-bold block uppercase text-xs">Địa điểm:</span>
                     <span class="text-slate-700 font-bold block truncate">{{ event.location_name }}</span>
                   </div>
                   <div class="mt-2">
-                    <span class="text-slate-400 font-bold block uppercase text-[9px]">Thời gian đề xuất:</span>
+                    <span class="text-slate-400 font-bold block uppercase text-xs">Thời gian đề xuất:</span>
                     <span class="text-slate-700 font-bold block">{{ event.suggested_date }} ({{ event.starts_at }} - {{ event.ends_at }})</span>
                   </div>
                   <div class="mt-2">
-                    <span class="text-slate-400 font-bold block uppercase text-[9px]">Chỉ tiêu dự kiến:</span>
+                    <span class="text-slate-400 font-bold block uppercase text-xs">Chỉ tiêu dự kiến:</span>
                     <span class="text-slate-700 font-bold block">{{ event.capacity }} lượt đặt lịch</span>
                   </div>
                 </div>
@@ -1621,7 +1734,7 @@ onMounted(async () => {
                   max="150"
                   class="h-9 min-w-0 w-full rounded-md border border-slate-200 px-2 text-center text-sm font-black text-slate-900 outline-none transition focus:border-[#E31837] focus:ring-2 focus:ring-red-100"
                 />
-                <span class="text-[10px] font-bold text-slate-400">đv</span>
+                <span class="text-xs font-bold text-slate-400">đv</span>
               </span>
             </label>
           </div>
@@ -1637,7 +1750,7 @@ onMounted(async () => {
                 </h3>
                 <p class="mt-1 text-xs text-slate-500">Các nhóm máu cần huy động người hiến gấp.</p>
               </div>
-              <span class="rounded-full bg-red-50 px-2.5 py-1 text-[10px] font-black text-[#E31837]">
+              <span class="rounded-full bg-red-50 px-2.5 py-1 text-xs font-black text-[#E31837]">
                 {{ activeSmartAlerts.length }} nhóm máu
               </span>
             </div>
@@ -1655,19 +1768,19 @@ onMounted(async () => {
                     </div>
                     <div class="min-w-0">
                       <h4 class="text-xs font-black text-slate-900">Tồn kho dưới ngưỡng an toàn tối thiểu</h4>
-                      <p class="mt-1 text-[11px] font-semibold text-slate-500">
+                      <p class="mt-1 text-xs font-semibold text-slate-500">
                         Thực tế: <span class="font-black text-[#E31837]">{{ alert.current_units }} đv</span>
                         / Yêu cầu: {{ alert.threshold_units }} đv.
                       </p>
-                      <p class="mt-2 text-[10px] font-bold text-slate-400">Kích hoạt: {{ formatAlertDateTime(alert.triggered_at) }}</p>
+                      <p class="mt-2 text-xs font-bold text-slate-400">Kích hoạt: {{ formatAlertDateTime(alert.triggered_at) }}</p>
                     </div>
                   </div>
                   <div class="flex shrink-0 items-center gap-2">
-                    <span class="rounded-full bg-red-100 px-2 py-1 text-[9px] font-black uppercase text-red-700 animate-pulse">Đang xảy ra</span>
+                    <span class="rounded-full bg-red-100 px-2 py-1 text-xs font-black uppercase text-red-700 animate-pulse">Đang xảy ra</span>
                     <button
                       @click="openMobilization(alert)"
                       :disabled="alertLoading"
-                      class="inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-[#E31837] px-3 text-[10px] font-black text-white transition hover:bg-red-700 active:scale-95 disabled:opacity-50"
+                      class="inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-[#E31837] px-3 text-xs font-black text-white transition hover:bg-red-700 active:scale-95 disabled:opacity-50"
                     >
                       <Loader2 v-if="alertLoading" class="h-3.5 w-3.5 animate-spin" />
                       Kích hoạt huy động
@@ -1692,7 +1805,7 @@ onMounted(async () => {
                 </h3>
                 <p class="mt-1 text-xs text-slate-500">Lịch sử phát hiện, huy động và khắc phục cảnh báo.</p>
               </div>
-              <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black text-slate-600">
+              <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600">
                 {{ resolvedSmartAlerts.length }} hoạt động
               </span>
             </div>
@@ -1706,15 +1819,15 @@ onMounted(async () => {
                   <div class="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <h4 class="text-xs font-black text-slate-900">Tồn kho dưới ngưỡng an toàn tối thiểu</h4>
-                      <p class="mt-0.5 text-[11px] font-semibold text-slate-500">
+                      <p class="mt-0.5 text-xs font-semibold text-slate-500">
                         Thực tế: <span class="font-bold text-[#E31837]">{{ alert.current_units }} đv</span> / Yêu cầu: {{ alert.threshold_units }} đv.
                       </p>
                     </div>
-                    <span class="rounded-full px-2 py-1 text-[9px] font-black uppercase" :class="alertStatusClass(alert.status)">
+                    <span class="rounded-full px-2 py-1 text-xs font-black uppercase" :class="alertStatusClass(alert.status)">
                       {{ alertStatusLabel(alert.status) }}
                     </span>
                   </div>
-                  <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-bold text-slate-400">
+                  <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold text-slate-400">
                     <span>Kích hoạt: {{ formatAlertDateTime(alert.triggered_at) }}</span>
                     <span v-if="alert.resolved_at">Khắc phục: {{ formatAlertDateTime(alert.resolved_at) }}</span>
                   </div>
@@ -1770,7 +1883,7 @@ onMounted(async () => {
                   <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
                   <div>
                     <p class="text-xs font-bold text-slate-900">Sử dụng thành công: {{ reportsData.utilization.utilization_rate }}%</p>
-                    <p class="text-[10px] text-slate-400 font-semibold">{{ reportsData.utilization.used_count }} túi máu cứu chữa</p>
+                    <p class="text-xs text-slate-400 font-semibold">{{ reportsData.utilization.used_count }} túi máu cứu chữa</p>
                   </div>
                 </div>
 
@@ -1778,7 +1891,7 @@ onMounted(async () => {
                   <span class="w-3 h-3 rounded-full bg-red-500"></span>
                   <div>
                     <p class="text-xs font-bold text-slate-900">Hao hụt (Quá hạn): {{ reportsData.utilization.waste_rate }}%</p>
-                    <p class="text-[10px] text-slate-400 font-semibold">{{ reportsData.utilization.expired_count }} túi đã hủy</p>
+                    <p class="text-xs text-slate-400 font-semibold">{{ reportsData.utilization.expired_count }} túi đã hủy</p>
                   </div>
                 </div>
 
@@ -1810,7 +1923,7 @@ onMounted(async () => {
                     :style="{ width: `${Math.min((item.volume_collected_ml / 40000) * 100, 100)}%` }"
                   />
                 </div>
-                <p class="text-[9px] text-slate-400 font-bold">Lượt đăng ký tham gia hiến: {{ item.appointments_count }} người</p>
+                <p class="text-xs text-slate-400 font-bold">Lượt đăng ký tham gia hiến: {{ item.appointments_count }} người</p>
               </div>
 
               <p v-if="reportsData.campaigns_efficiency.length === 0" class="text-center text-slate-400 italic py-6">
@@ -1826,8 +1939,8 @@ onMounted(async () => {
           
           <div class="overflow-x-auto" v-if="reportsData">
             <table class="w-full text-left border-collapse">
-              <thead>
-                <tr class="border-b border-slate-100 text-[10px] font-black uppercase text-slate-400">
+              <thead class="sticky top-0 z-10 bg-slate-50">
+                <tr class="border-b border-slate-100 text-xs font-black uppercase text-slate-400">
                   <th class="pb-3">Mã ca khẩn cấp</th>
                   <th class="pb-3">Nhóm máu</th>
                   <th class="pb-3">Nhu cầu chỉ tiêu</th>
@@ -1849,7 +1962,7 @@ onMounted(async () => {
                   <td class="py-3 font-mono text-slate-600">{{ item.turnout_rate }}%</td>
                   <td class="py-3 text-right">
                     <span
-                      class="rounded-full px-2 py-0.5 text-[9px] font-black uppercase"
+                      class="rounded-full px-2 py-0.5 text-xs font-black uppercase"
                       :class="item.status === 'fulfilled' || item.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'"
                     >
                       {{ item.status }}
@@ -1871,7 +1984,7 @@ onMounted(async () => {
     <!-- MODAL: ADD BAG -->
     <div
       v-if="showAddBagModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+      role="dialog" aria-modal="true" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
     >
       <div class="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl space-y-6">
         <div class="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -1958,7 +2071,7 @@ onMounted(async () => {
     <!-- MODAL: MOBILIZE CAMPAIGN CONFIRMATION -->
     <div
       v-if="showMobilizeModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+      role="dialog" aria-modal="true" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
     >
       <div class="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-6 shadow-xl space-y-5">
         <div class="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -1994,11 +2107,11 @@ onMounted(async () => {
 
           <div class="grid grid-cols-2 gap-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
             <div>
-              <p class="text-[10px] text-slate-400 uppercase tracking-wide">Nhóm máu nhắm chọn</p>
+              <p class="text-xs text-slate-400 uppercase tracking-wide">Nhóm máu nhắm chọn</p>
               <strong class="text-xs text-slate-800">Nhóm máu {{ mobilizationData.target_blood_type }}</strong>
             </div>
             <div>
-              <p class="text-[10px] text-slate-400 uppercase tracking-wide">Đối tượng đích</p>
+              <p class="text-xs text-slate-400 uppercase tracking-wide">Đối tượng đích</p>
               <strong class="text-xs text-[#E31837]">Khẩn cấp / Vị trí gần Bệnh viện</strong>
             </div>
           </div>
@@ -2027,7 +2140,7 @@ onMounted(async () => {
     <!-- MODAL: CREATE EVENT FROM AI SUGGESTION -->
     <div
       v-if="showAiEventModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+      role="dialog" aria-modal="true" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
     >
       <div class="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-6 shadow-xl space-y-4">
         <div class="flex items-center justify-between border-b border-slate-100 pb-3">
